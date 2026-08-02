@@ -1,13 +1,16 @@
 package com.faiqbaig.eaw
 
+import android.media.MediaPlayer
+import android.media.audiofx.LoudnessEnhancer
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -17,13 +20,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Prevent the UI from fitting system windows, allowing it to draw edge-to-edge
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        // Retrieve the insets controller
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
-
-        // Hide system bars and enable transient swipe behavior
         windowInsetsController.apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
@@ -35,11 +34,42 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
+                    val context = LocalContext.current
+
+                    DisposableEffect(Unit) {
+                        val mediaPlayer = MediaPlayer.create(context, R.raw.bgm_main).apply {
+                            isLooping = true
+                            setVolume(1.0f, 1.0f) // Max native stream volume
+                            start()
+                        }
+
+                        // Attach LoudnessEnhancer to gain extra volume boost (+200 mB / ~2dB boost)
+                        val enhancer = try {
+                            LoudnessEnhancer(mediaPlayer.audioSessionId).apply {
+                                setTargetGain(350) // Gain in millibels
+                                enabled = true
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+
+                        onDispose {
+                            try {
+                                enhancer?.release()
+                            } catch (e: Exception) { /* Ignored on release */ }
+
+                            if (mediaPlayer.isPlaying) {
+                                mediaPlayer.stop()
+                            }
+                            mediaPlayer.release()
+                        }
+                    }
+
                     MainMenuScreen(
                         onStartNewClick = { /* TODO: Navigate to Mode Select */ },
                         onLoadGameClick = { /* TODO: Load Conquest save */ },
-                        onExitClick = { finish() }, // This will close the app
-                        onSettingsClick = { /* TODO: Open Settings dialog/screen */ }
+                        onExitClick = { finish() },
+                        onSettingsClick = { /* TODO: Open Settings */ }
                     )
                 }
             }

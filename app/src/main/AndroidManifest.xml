@@ -13,10 +13,11 @@
         android:theme="@style/Theme.EAW">
         <activity
             android:name=".MainActivity"
-            android:screenOrientation="landscape"
+            android:screenOrientation="sensorLandscape"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.EAW">
+            android:theme="@style/Theme.EAW"
+            tools:ignore="DiscouragedApi">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

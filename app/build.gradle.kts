@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 
     // Version must match your Kotlin version perfectly
-    id("com.google.devtools.ksp") version "1.9.23-1.0.20"
+    id("com.google.devtools.ksp")
 
     // Removed 'apply false' and matched the version to your dependencies
     id("com.google.dagger.hilt.android") version "2.51.1"

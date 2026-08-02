@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.faiqbaig.eaw.ui.MainMenuScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,8 +35,12 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Placeholder for your Milestone 2 Sandbox rendering
-                    Text(text = "Corps: Europe at War - Sandbox Environment")
+                    MainMenuScreen(
+                        onStartNewClick = { /* TODO: Navigate to Mode Select */ },
+                        onLoadGameClick = { /* TODO: Load Conquest save */ },
+                        onExitClick = { finish() }, // This will close the app
+                        onSettingsClick = { /* TODO: Open Settings dialog/screen */ }
+                    )
                 }
             }
         }

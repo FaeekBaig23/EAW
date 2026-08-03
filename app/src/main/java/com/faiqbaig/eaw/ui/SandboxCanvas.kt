@@ -19,6 +19,9 @@ import com.faiqbaig.eaw.core.Faction
 import com.faiqbaig.eaw.core.GameUnit
 import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitSubtype
+import androidx.compose.ui.graphics.nativeCanvas
+import android.graphics.Paint
+import android.graphics.Typeface
 
 @Composable
 fun SandboxMapCanvas(units: List<GameUnit>, modifier: Modifier = Modifier) {
@@ -42,7 +45,8 @@ fun SandboxMapCanvas(units: List<GameUnit>, modifier: Modifier = Modifier) {
                     unitClass = unit.unitClass,
                     subtype = unit.subtype,
                     factionColor = unit.faction.color,
-                    flagBitmap = flagBitmaps[unit.faction]
+                    flagBitmap = flagBitmaps[unit.faction],
+                    commanderName = unit.commanderName
                 )
             }
         }
@@ -54,74 +58,103 @@ fun DrawScope.drawTacticalSprite(
     unitClass: UnitClass,
     subtype: UnitSubtype,
     factionColor: Color,
-    flagBitmap: ImageBitmap? = null
+    flagBitmap: ImageBitmap? = null,
+    commanderName: String? = null // New parameter
 ) {
     val rectWidth = 60f
     val rectHeight = 20f
-    val topLeft = Offset(-rectWidth / 2, -rectHeight / 2)
-    val size = Size(rectWidth, rectHeight)
+    val edgeThickness = 4f // The thickened edge we set earlier
+
+    val baseTopLeft = Offset(-rectWidth / 2, -rectHeight / 2)
+    val baseSize = Size(rectWidth, rectHeight)
+    val totalTopLeft = Offset(-rectWidth / 2, -rectHeight / 2 - edgeThickness)
+    val totalSize = Size(rectWidth, rectHeight + edgeThickness)
 
     when (unitClass) {
         UnitClass.INFANTRY -> {
-            // Base Rectangle
-            drawRect(color = factionColor, size = size, topLeft = topLeft)
+            // Base Rectangle (Faction Color)
+            drawRect(color = factionColor, size = baseSize, topLeft = baseTopLeft)
 
-            // Front facing edge colored in white
-            drawLine(
+            // Line Diagonals (Only drawn for LINE infantry, omitted for GRENADIER and LIGHT)
+            if (subtype == UnitSubtype.LINE) {
+                drawLine(Color.White, Offset(-rectWidth / 2, -rectHeight / 2), Offset(rectWidth / 2, rectHeight / 2), strokeWidth = edgeThickness)
+                drawLine(Color.White, Offset(-rectWidth / 2, rectHeight / 2), Offset(rectWidth / 2, -rectHeight / 2), strokeWidth = edgeThickness)
+            }
+
+            // Grenadier Front-Back Quadrants (Rendered alone without intersecting lines)
+            if (subtype == UnitSubtype.GRENADIER) {
+                // Front quadrant
+                val frontPath = Path().apply {
+                    moveTo(-rectWidth / 2, -rectHeight / 2)
+                    lineTo(rectWidth / 2, -rectHeight / 2)
+                    lineTo(0f, 0f)
+                    close()
+                }
+                drawPath(frontPath, Color.White)
+
+                // Back quadrant
+                val backPath = Path().apply {
+                    moveTo(-rectWidth / 2, rectHeight / 2)
+                    lineTo(rectWidth / 2, rectHeight / 2)
+                    lineTo(0f, 0f)
+                    close()
+                }
+                drawPath(backPath, Color.White)
+            }
+
+            // Front facing edge colored in white (Attached to the OUTSIDE front)
+            drawRect(
                 color = Color.White,
-                start = Offset(-rectWidth / 2, -rectHeight / 2),
-                end = Offset(rectWidth / 2, -rectHeight / 2),
-                strokeWidth = 4f
+                topLeft = totalTopLeft,
+                size = Size(rectWidth, edgeThickness)
             )
 
-            // Line & Grenadier Diagonals
-            if (subtype == UnitSubtype.LINE || subtype == UnitSubtype.GRENADIER) {
-                drawLine(Color.White, Offset(-rectWidth / 2, -rectHeight / 2), Offset(rectWidth / 2, rectHeight / 2), strokeWidth = 2f)
-                drawLine(Color.White, Offset(-rectWidth / 2, rectHeight / 2), Offset(rectWidth / 2, -rectHeight / 2), strokeWidth = 2f)
-            }
+            // Black outline spanning the combined shape (base + front edge)
+            drawRect(color = Color.Black, size = totalSize, topLeft = totalTopLeft, style = Stroke(1.5f))
 
-            // Grenadier Side Quadrants
-            if (subtype == UnitSubtype.GRENADIER) {
-                val leftPath = Path().apply {
-                    moveTo(-rectWidth / 2, -rectHeight / 2)
-                    lineTo(0f, 0f)
-                    lineTo(-rectWidth / 2, rectHeight / 2)
-                    close()
-                }
-                drawPath(leftPath, Color.White)
-
-                val rightPath = Path().apply {
-                    moveTo(rectWidth / 2, -rectHeight / 2)
-                    lineTo(0f, 0f)
-                    lineTo(rectWidth / 2, rectHeight / 2)
-                    close()
-                }
-                drawPath(rightPath, Color.White)
-            }
-
-            // Black outline to contain it all
-            drawRect(color = Color.Black, size = size, topLeft = topLeft, style = Stroke(1.5f))
+            // A crisp separator line between the white edge and the colored base
+            drawLine(
+                color = Color.Black,
+                start = Offset(-rectWidth / 2, -rectHeight / 2),
+                end = Offset(rectWidth / 2, -rectHeight / 2),
+                strokeWidth = 1f
+            )
         }
 
         UnitClass.CAVALRY -> {
             // Base Rectangle
-            drawRect(color = factionColor, size = size, topLeft = topLeft)
+            drawRect(color = factionColor, size = baseSize, topLeft = baseTopLeft)
 
-            // Filled Diagonal
+            // Filled Diagonal (Upper-left to lower-right)
             val diagColor = if (subtype == UnitSubtype.HEAVY) Color.Gray else Color.White
             val fillPath = Path().apply {
-                moveTo(-rectWidth / 2, rectHeight / 2) // Bottom left
-                lineTo(rectWidth / 2, -rectHeight / 2)  // Top right
-                lineTo(rectWidth / 2, rectHeight / 2)   // Bottom right
+                moveTo(-rectWidth / 2, -rectHeight / 2) // Upper left
+                lineTo(rectWidth / 2, rectHeight / 2)   // Lower right
+                lineTo(-rectWidth / 2, rectHeight / 2)  // Lower left
                 close()
             }
             drawPath(fillPath, diagColor)
 
-            drawRect(color = Color.Black, size = size, topLeft = topLeft, style = Stroke(1.5f))
+            // Front facing edge colored in white (Attached to the OUTSIDE front)
+            drawRect(
+                color = Color.White,
+                topLeft = totalTopLeft,
+                size = Size(rectWidth, edgeThickness)
+            )
+
+            // Black outline spanning the combined shape
+            drawRect(color = Color.Black, size = totalSize, topLeft = totalTopLeft, style = Stroke(1.5f))
+
+            // A crisp separator line
+            drawLine(
+                color = Color.Black,
+                start = Offset(-rectWidth / 2, -rectHeight / 2),
+                end = Offset(rectWidth / 2, -rectHeight / 2),
+                strokeWidth = 1f
+            )
         }
 
         UnitClass.ARTILLERY -> {
-            // Top-down cannon composed of basic shapes
             // Wheels
             drawRect(Color.Black, topLeft = Offset(-16f, -12f), size = Size(8f, 24f))
             drawRect(Color.Black, topLeft = Offset(8f, -12f), size = Size(8f, 24f))
@@ -135,24 +168,76 @@ fun DrawScope.drawTacticalSprite(
         }
 
         UnitClass.COMMANDER -> {
-            // Grey Pole
-            drawLine(Color.Gray, start = Offset(0f, -20f), end = Offset(0f, 20f), strokeWidth = 3f)
-
             if (flagBitmap != null) {
-                val flagWidth = 36
-                val flagHeight = 24
+                val flagWidth = 72
+                val flagHeight = 48
+                val flagTopLeftX = -flagWidth / 2
+                val flagTopLeftY = -40
+
+                // The bottom of the flag is at y = 8f.
+                // The old pole went to 24f (length of 16).
+                // Extending it by 50% gives a length of 24. (8f + 24 = 32f)
+                val flagBottomY = (flagTopLeftY + flagHeight).toFloat()
+                val poleBaseY = 32f
+
+                // Draw extended pole (Silver)
+                drawLine(
+                    color = Color(0xFFC0C0C0),
+                    start = Offset(0f, flagBottomY),
+                    end = Offset(0f, poleBaseY),
+                    strokeWidth = 4f
+                )
+
                 drawImage(
                     image = flagBitmap,
-                    dstOffset = IntOffset(0, -20),
+                    dstOffset = IntOffset(flagTopLeftX, flagTopLeftY),
                     dstSize = IntSize(flagWidth, flagHeight)
                 )
-                // Grey Outline
+
+                // Uniform Silver Outline
                 drawRect(
-                    color = Color.Gray,
-                    topLeft = Offset(0f, -20f),
+                    color = Color(0xFFC0C0C0),
+                    topLeft = Offset(flagTopLeftX.toFloat(), flagTopLeftY.toFloat()),
                     size = Size(flagWidth.toFloat(), flagHeight.toFloat()),
-                    style = Stroke(width = 2f)
+                    style = Stroke(width = 2.5f)
                 )
+
+                // Resolve Level to Roman Numeral
+                val numeral = when (subtype) {
+                    UnitSubtype.LEVEL_1 -> "I"
+                    UnitSubtype.LEVEL_2 -> "II"
+                    UnitSubtype.LEVEL_3 -> "III"
+                    UnitSubtype.LEVEL_4 -> "IV"
+                    UnitSubtype.LEVEL_5 -> "V"
+                    else -> ""
+                }
+
+                drawContext.canvas.nativeCanvas.apply {
+                    // Commander Name Text
+                    if (commanderName != null) {
+                        val namePaint = Paint().apply {
+                            color = android.graphics.Color.WHITE
+                            textSize = 22f
+                            textAlign = Paint.Align.CENTER
+                            typeface = Typeface.DEFAULT_BOLD
+                            setShadowLayer(4f, 0f, 0f, android.graphics.Color.BLACK)
+                        }
+                        drawText(commanderName, 0f, flagTopLeftY - 12f, namePaint)
+                    }
+
+                    // Level Numeral Text at the pole base
+                    if (numeral.isNotEmpty()) {
+                        val numeralPaint = Paint().apply {
+                            color = android.graphics.Color.parseColor("#FFD700") // Yellow
+                            textSize = 18f
+                            textAlign = Paint.Align.LEFT
+                            typeface = Typeface.DEFAULT_BOLD
+                            setShadowLayer(3f, 0f, 0f, android.graphics.Color.BLACK)
+                        }
+                        // x = 6f pushes it slightly right of the 4f thick pole, y = poleBaseY anchors it to the bottom
+                        drawText(numeral, 6f, poleBaseY, numeralPaint)
+                    }
+                }
             }
         }
     }

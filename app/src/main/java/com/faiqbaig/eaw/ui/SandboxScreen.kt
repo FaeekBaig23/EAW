@@ -2,6 +2,7 @@ package com.faiqbaig.eaw.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,21 +36,166 @@ import androidx.compose.ui.window.Dialog
 import com.faiqbaig.eaw.core.Faction
 import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitSubtype
-import androidx.compose.foundation.Image
 import kotlin.math.atan2
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 
 @Composable
 fun SandboxScreen(
     viewModel: SandboxViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     onExitToMenu: () -> Unit
 ) {
-    var showSettings by remember { mutableStateOf(false) }
-    var showDeploymentPanel by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 1. The Game Map (Always rendered at the bottom layer)
+        SandboxMapCanvas(
+            units = viewModel.units,
+            modifier = Modifier.fillMaxSize()
+        )
 
-    // Select and Place State
+        // 2. Phase-Based Overlays Layered over the Map
+        when (viewModel.currentPhase) {
+            GamePhase.SETUP -> {
+                SetupPhaseOverlay(viewModel, onExitToMenu)
+            }
+            GamePhase.DEPLOYMENT -> {
+                DeploymentPhaseOverlay(viewModel)
+            }
+            GamePhase.BATTLE -> {
+                BattlePhaseOverlay(viewModel)
+            }
+            GamePhase.POST_BATTLE -> {
+                PostBattleOverlay(viewModel, onExitToMenu)
+            }
+        }
+    }
+}
+
+@Composable
+fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
+    // We use a String state for the text field to handle empty states smoothly
+    var unitsText by remember { mutableStateOf(viewModel.config.unitsPerSide.toString()) }
+    var commandersPerSide by remember { mutableFloatStateOf(viewModel.config.commandersPerSide.toFloat().coerceIn(0f, 4f)) }
+    var infAmmo by remember { mutableStateOf(viewModel.config.infiniteAmmo) }
+    var infMorale by remember { mutableStateOf(viewModel.config.infiniteMorale) }
+
+    val scrollState = rememberScrollState()
+
+    Dialog(onDismissRequest = { /* Cannot dismiss, must start or exit */ }) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF1E221E),
+            border = BorderStroke(1.5.dp, BrightYellow)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    // This makes the column scrollable if it exceeds screen height
+                    .verticalScroll(scrollState),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("SANDBOX SETUP", color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                FactionSelector(
+                    label = "Player 1 Faction",
+                    selectedFaction = viewModel.player1Faction,
+                    opponentFaction = viewModel.player2Faction,
+                    onFactionSelected = { viewModel.updatePlayer1Faction(it) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                FactionSelector(
+                    label = "Player 2 Faction",
+                    selectedFaction = viewModel.player2Faction,
+                    opponentFaction = viewModel.player1Faction,
+                    onFactionSelected = { viewModel.updatePlayer2Faction(it) }
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Units Text Field
+                OutlinedTextField(
+                    value = unitsText,
+                    onValueChange = { newValue ->
+                        // Filter out any non-digit characters (e.g., spaces, letters)
+                        val filtered = newValue.filter { it.isDigit() }
+                        if (filtered.isEmpty()) {
+                            unitsText = ""
+                        } else {
+                            // Enforce max limit of 30
+                            val num = filtered.toIntOrNull() ?: 0
+                            unitsText = if (num > 30) "30" else filtered
+                        }
+                    },
+                    label = { Text("Units per side (Max 30)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = BrightYellow,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = BrightYellow,
+                        unfocusedLabelColor = Color.Gray
+                    ),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Commanders Slider (0 to 4)
+                Text("Commanders per side: ${commandersPerSide.toInt()}", color = Color.White)
+                Slider(
+                    value = commandersPerSide,
+                    onValueChange = { commandersPerSide = it },
+                    valueRange = 0f..4f,
+                    steps = 3 // Divides the range (1, 2, 3) between 0 and 4
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Switch(checked = infAmmo, onCheckedChange = { infAmmo = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Infinite Ammo", color = Color.White)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Switch(checked = infMorale, onCheckedChange = { infMorale = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Infinite Morale", color = Color.White)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    OutlinedButton(onClick = onExit, border = BorderStroke(1.dp, Color.Red)) {
+                        Text("Back", color = Color.Red)
+                    }
+                    Button(
+                        onClick = {
+                            // Fallback to 10 if they leave the field completely blank
+                            val finalUnits = unitsText.toIntOrNull() ?: 10
+                            viewModel.updateConfig(GameConfig(finalUnits, commandersPerSide.toInt(), infAmmo, infMorale))
+                            viewModel.startDeployment()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
+                    ) {
+                        Text("Begin Deployment", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
+    var showDeploymentPanel by remember { mutableStateOf(false) }
     var pendingDeployment by remember { mutableStateOf<Pair<UnitClass, UnitSubtype>?>(null) }
     var proxyPosition by remember { mutableStateOf<Offset?>(null) }
     var proxyRotation by remember { mutableStateOf(0f) }
+    var deployingForPlayer1 by remember { mutableStateOf(true) }
 
     val deployableRoster = listOf(
         Pair(UnitClass.COMMANDER, UnitSubtype.LEVEL_5),
@@ -66,39 +211,34 @@ fun SandboxScreen(
         Pair(UnitClass.ARTILLERY, UnitSubtype.NONE)
     )
 
-    var deployingForPlayer1 by remember { mutableStateOf(true) }
-
     Box(modifier = Modifier.fillMaxSize()) {
-
-        // 1. The Game Map
-        SandboxMapCanvas(
-            units = viewModel.units,
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // 2. Top Settings Overlay (Removed Text Heading)
+        // Top Bar: Status & Start Battle
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
-                .align(Alignment.TopStart),
+                .align(Alignment.TopCenter),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = { showSettings = true },
+            Text(
+                text = "DEPLOYMENT PHASE",
+                color = BrightYellow,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                    .border(1.dp, BrightYellow, RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .padding(8.dp)
+            )
+
+            Button(
+                onClick = { viewModel.startBattle() },
+                colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                    tint = BrightYellow
-                )
+                Text("Start Battle", fontWeight = FontWeight.Bold)
             }
         }
 
-        // 3. Deployment Panel & Button
+        // Deployment Panel & Button
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -106,7 +246,6 @@ fun SandboxScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (showDeploymentPanel) {
-                // Compact Deployment Roster
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = Color.Black.copy(alpha = 0.9f),
@@ -134,7 +273,6 @@ fun SandboxScreen(
                                     )
                                 }
                             }
-                            // Close Button inside panel
                             IconButton(onClick = { showDeploymentPanel = false }) {
                                 Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.Gray)
                             }
@@ -142,7 +280,9 @@ fun SandboxScreen(
 
                         val activeFaction = if (deployingForPlayer1) viewModel.player1Faction else viewModel.player2Faction
                         val context = LocalContext.current
-                        val flagBitmap = ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
+                        val flagBitmap = remember(activeFaction.flagResId) {
+                            ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
+                        }
 
                         LazyRow(
                             modifier = Modifier.fillMaxWidth(),
@@ -163,7 +303,6 @@ fun SandboxScreen(
                                         withTransform({
                                             translate(left = size.width / 2, top = size.height / 2)
                                         }) {
-                                            // No name is passed here, so it renders without text in the UI
                                             drawTacticalSprite(unitClass, subtype, activeFaction.color, flagBitmap, null)
                                         }
                                     }
@@ -189,7 +328,6 @@ fun SandboxScreen(
                     }
                 }
             } else {
-                // Show Button ONLY when Roster is closed
                 IconButton(
                     onClick = { showDeploymentPanel = true },
                     modifier = Modifier
@@ -207,9 +345,13 @@ fun SandboxScreen(
             }
         }
 
-        // 4. Select and Place Overlay (Tap to place, Drag to rotate)
+        // Select and Place Overlay (Tap to place, Drag to rotate)
         if (pendingDeployment != null) {
             val activeFaction = if (deployingForPlayer1) viewModel.player1Faction else viewModel.player2Faction
+            val context = LocalContext.current
+            val flagBitmap = remember(activeFaction.flagResId) {
+                ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
+            }
 
             Box(
                 modifier = Modifier
@@ -227,11 +369,9 @@ fun SandboxScreen(
                                 val change = event.changes.firstOrNull()
 
                                 if (change != null && change.pressed) {
-                                    // Calculate rotation based on drag vector
                                     val dx = change.position.x - down.position.x
                                     val dy = change.position.y - down.position.y
 
-                                    // Small deadzone so normal taps don't cause wild spinning
                                     if (dx * dx + dy * dy > 50) {
                                         proxyRotation = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
                                     }
@@ -242,7 +382,6 @@ fun SandboxScreen(
                                 }
                             } while (!dragEnded)
 
-                            // Commit the unit to the ViewModel on finger lift
                             viewModel.deployUnit(
                                 faction = activeFaction,
                                 unitClass = pendingDeployment!!.first,
@@ -252,17 +391,15 @@ fun SandboxScreen(
                                 rotation = proxyRotation
                             )
 
-                            // Clean up state
                             pendingDeployment = null
                             proxyPosition = null
                         }
                     }
             ) {
-                // Cancel Button and Instructions
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 24.dp)
+                        .padding(top = 80.dp)
                         .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -276,11 +413,7 @@ fun SandboxScreen(
                     }
                 }
 
-                // Draw proxy on screen while dragging
                 if (proxyPosition != null) {
-                    val context = LocalContext.current
-                    val flagBitmap = ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
-
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         withTransform({
                             translate(proxyPosition!!.x, proxyPosition!!.y)
@@ -291,74 +424,8 @@ fun SandboxScreen(
                                 subtype = pendingDeployment!!.second,
                                 factionColor = activeFaction.color,
                                 flagBitmap = flagBitmap,
-                                commanderName = null // Keep proxy unnamed until it hits the ViewModel
+                                commanderName = null
                             )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Settings Dialog... (Keep your existing Dialog code here)
-    if (showSettings) {
-        Dialog(onDismissRequest = { showSettings = false }) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF1E221E), // Dark tactical background
-                border = BorderStroke(1.5.dp, BrightYellow)
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "SANDBOX SETTINGS",
-                        color = BrightYellow,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Player 1 Faction Select
-                    FactionSelector(
-                        label = "Side 1 (Left)",
-                        selectedFaction = viewModel.player1Faction,
-                        opponentFaction = viewModel.player2Faction,
-                        onFactionSelected = { viewModel.updatePlayer1Faction(it) }
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Player 2 Faction Select
-                    FactionSelector(
-                        label = "Side 2 (Right)",
-                        selectedFaction = viewModel.player2Faction,
-                        opponentFaction = viewModel.player1Faction,
-                        onFactionSelected = { viewModel.updatePlayer2Faction(it) }
-                    )
-
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    // Dialog Actions
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        OutlinedButton(
-                            onClick = { onExitToMenu() },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
-                            border = BorderStroke(1.dp, Color.Red)
-                        ) {
-                            Text("Exit to Menu")
-                        }
-
-                        Button(
-                            onClick = { showSettings = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
-                        ) {
-                            Text("Resume", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -367,7 +434,82 @@ fun SandboxScreen(
     }
 }
 
-// Helper Composable for Faction Selection
+@Composable
+fun BattlePhaseOverlay(viewModel: SandboxViewModel) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(16.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Button(
+                onClick = { viewModel.endBattle("${viewModel.player2Faction.name} Wins by Surrender!") },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
+            ) {
+                Text("P1 Surrender", color = Color.White)
+            }
+
+            Button(
+                onClick = { viewModel.endBattle("${viewModel.player1Faction.name} Wins by Surrender!") },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
+            ) {
+                Text("P2 Surrender", color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+fun PostBattleOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
+    val p1Loss = viewModel.p1InitialHp - viewModel.getP1CurrentHp()
+    val p2Loss = viewModel.p2InitialHp - viewModel.getP2CurrentHp()
+
+    Dialog(onDismissRequest = onExit) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF1E221E),
+            border = BorderStroke(2.dp, BrightYellow)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("BATTLE CONCLUDED", color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                Text(viewModel.matchVerdict, color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(vertical = 8.dp))
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(viewModel.player1Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold)
+                        Text("Initial Strength: ${viewModel.p1InitialHp}", color = Color.White)
+                        Text("Casualties (HP): $p1Loss", color = Color.Red)
+                        Text("Remaining: ${viewModel.getP1CurrentHp()}", color = Color.Green)
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(viewModel.player2Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold)
+                        Text("Initial Strength: ${viewModel.p2InitialHp}", color = Color.White)
+                        Text("Casualties (HP): $p2Loss", color = Color.Red)
+                        Text("Remaining: ${viewModel.getP2CurrentHp()}", color = Color.Green)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Button(
+                    onClick = onExit,
+                    colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
+                ) {
+                    Text("Return to Menu", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun FactionSelector(
     label: String,
@@ -390,7 +532,6 @@ fun FactionSelector(
                 val isSelected = faction == selectedFaction
                 val isOpponent = faction == opponentFaction
 
-                // Highlight selected, hide/dim opponent's choice to prevent duplicate selection
                 val borderColor = if (isSelected) BrightYellow else Color.Transparent
                 val opacity = if (isOpponent) 0.2f else 1.0f
 
@@ -402,7 +543,7 @@ fun FactionSelector(
                         .size(48.dp, 32.dp)
                         .alpha(opacity)
                         .border(2.dp, borderColor, RoundedCornerShape(2.dp))
-                        .clickable(enabled = !isOpponent) { // Prevents clicking the opponent's faction
+                        .clickable(enabled = !isOpponent) {
                             onFactionSelected(faction)
                         }
                 )

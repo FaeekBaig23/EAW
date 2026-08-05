@@ -11,7 +11,10 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -21,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -30,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -37,10 +42,7 @@ import com.faiqbaig.eaw.core.Faction
 import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitSubtype
 import kotlin.math.atan2
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
+
 
 @Composable
 fun SandboxScreen(
@@ -48,9 +50,22 @@ fun SandboxScreen(
     onExitToMenu: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
+
+        // FOG OF WAR LOGIC: Hide enemy units during deployment
+        val visibleUnits = when (viewModel.currentPhase) {
+            GamePhase.DEPLOYMENT -> {
+                if (viewModel.activeDeploymentPlayer == 1) {
+                    viewModel.units.filter { it.faction == viewModel.player1Faction }
+                } else {
+                    viewModel.units.filter { it.faction == viewModel.player2Faction }
+                }
+            }
+            else -> viewModel.units // Show all units during Battle and Post-Battle
+        }
+
         // 1. The Game Map (Always rendered at the bottom layer)
         SandboxMapCanvas(
-            units = viewModel.units,
+            units = visibleUnits,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -74,7 +89,6 @@ fun SandboxScreen(
 
 @Composable
 fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
-    // We use a String state for the text field to handle empty states smoothly
     var unitsText by remember { mutableStateOf(viewModel.config.unitsPerSide.toString()) }
     var commandersPerSide by remember { mutableFloatStateOf(viewModel.config.commandersPerSide.toFloat().coerceIn(0f, 4f)) }
     var infAmmo by remember { mutableStateOf(viewModel.config.infiniteAmmo) }
@@ -91,7 +105,6 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
             Column(
                 modifier = Modifier
                     .padding(24.dp)
-                    // This makes the column scrollable if it exceeds screen height
                     .verticalScroll(scrollState),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -114,16 +127,13 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Units Text Field
                 OutlinedTextField(
                     value = unitsText,
                     onValueChange = { newValue ->
-                        // Filter out any non-digit characters (e.g., spaces, letters)
                         val filtered = newValue.filter { it.isDigit() }
                         if (filtered.isEmpty()) {
                             unitsText = ""
                         } else {
-                            // Enforce max limit of 30
                             val num = filtered.toIntOrNull() ?: 0
                             unitsText = if (num > 30) "30" else filtered
                         }
@@ -144,13 +154,12 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Commanders Slider (0 to 4)
                 Text("Commanders per side: ${commandersPerSide.toInt()}", color = Color.White)
                 Slider(
                     value = commandersPerSide,
                     onValueChange = { commandersPerSide = it },
                     valueRange = 0f..4f,
-                    steps = 3 // Divides the range (1, 2, 3) between 0 and 4
+                    steps = 3
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -174,7 +183,6 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
                     }
                     Button(
                         onClick = {
-                            // Fallback to 10 if they leave the field completely blank
                             val finalUnits = unitsText.toIntOrNull() ?: 10
                             viewModel.updateConfig(GameConfig(finalUnits, commandersPerSide.toInt(), infAmmo, infMorale))
                             viewModel.startDeployment()
@@ -195,7 +203,9 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
     var pendingDeployment by remember { mutableStateOf<Pair<UnitClass, UnitSubtype>?>(null) }
     var proxyPosition by remember { mutableStateOf<Offset?>(null) }
     var proxyRotation by remember { mutableStateOf(0f) }
-    var deployingForPlayer1 by remember { mutableStateOf(true) }
+
+    val isP1 = viewModel.activeDeploymentPlayer == 1
+    val activeFaction = if (isP1) viewModel.player1Faction else viewModel.player2Faction
 
     val deployableRoster = listOf(
         Pair(UnitClass.COMMANDER, UnitSubtype.LEVEL_5),
@@ -212,7 +222,27 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Top Bar: Status & Start Battle
+
+        // 1. Draw Visual Deployment Zones
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val thirdWidth = size.width / 3f
+            val twoThirdsWidth = (size.width * 2) / 3f
+
+            drawRect(
+                color = Color.Red.copy(alpha = 0.15f),
+                topLeft = Offset(thirdWidth, 0f),
+                size = Size(thirdWidth, size.height)
+            )
+
+            if (isP1) {
+                drawRect(color = Color.Green.copy(alpha = 0.1f), size = Size(thirdWidth, size.height))
+                drawLine(color = Color.Green, start = Offset(thirdWidth, 0f), end = Offset(thirdWidth, size.height), strokeWidth = 3f)
+            } else {
+                drawRect(color = Color.Green.copy(alpha = 0.1f), topLeft = Offset(twoThirdsWidth, 0f), size = Size(thirdWidth, size.height))
+                drawLine(color = Color.Green, start = Offset(twoThirdsWidth, 0f), end = Offset(twoThirdsWidth, size.height), strokeWidth = 3f)
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -222,7 +252,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "DEPLOYMENT PHASE",
+                text = "P${viewModel.activeDeploymentPlayer} DEPLOYMENT",
                 color = BrightYellow,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
@@ -230,15 +260,27 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                     .padding(8.dp)
             )
 
-            Button(
-                onClick = { viewModel.startBattle() },
-                colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
-            ) {
-                Text("Start Battle", fontWeight = FontWeight.Bold)
+            if (isP1) {
+                Button(
+                    onClick = {
+                        viewModel.finishP1Deployment()
+                        pendingDeployment = null
+                        showDeploymentPanel = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
+                ) {
+                    Text("End P1 Turn", fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Button(
+                    onClick = { viewModel.startBattle() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
+                ) {
+                    Text("Start Battle", fontWeight = FontWeight.Bold)
+                }
             }
         }
 
-        // Deployment Panel & Button
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -257,28 +299,27 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row {
-                                TextButton(onClick = { deployingForPlayer1 = true }) {
-                                    Text(
-                                        text = "P1: ${viewModel.player1Faction.name}",
-                                        color = if (deployingForPlayer1) BrightYellow else Color.Gray,
-                                        fontWeight = if (deployingForPlayer1) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                }
-                                TextButton(onClick = { deployingForPlayer1 = false }) {
-                                    Text(
-                                        text = "P2: ${viewModel.player2Faction.name}",
-                                        color = if (!deployingForPlayer1) BrightYellow else Color.Gray,
-                                        fontWeight = if (!deployingForPlayer1) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Deploying: ${activeFaction.name}",
+                                    color = BrightYellow,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                val uCount = viewModel.getDeployedUnitCount(activeFaction)
+                                val cCount = viewModel.getDeployedCommanderCount(activeFaction)
+                                Text(
+                                    text = "Units: $uCount/${viewModel.config.unitsPerSide} | Cmdrs: $cCount/${viewModel.config.commandersPerSide}",
+                                    color = Color.White,
+                                    fontSize = 12.sp
+                                )
                             }
                             IconButton(onClick = { showDeploymentPanel = false }) {
                                 Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.Gray)
                             }
                         }
 
-                        val activeFaction = if (deployingForPlayer1) viewModel.player1Faction else viewModel.player2Faction
                         val context = LocalContext.current
                         val flagBitmap = remember(activeFaction.flagResId) {
                             ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
@@ -317,11 +358,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                                         else -> subtype.name
                                     }
 
-                                    Text(
-                                        text = displayName,
-                                        color = Color.White,
-                                        fontSize = 10.sp
-                                    )
+                                    Text(text = displayName, color = Color.White, fontSize = 10.sp)
                                 }
                             }
                         }
@@ -336,18 +373,12 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                         .background(Color.Black.copy(alpha = 0.8f), shape = RoundedCornerShape(4.dp))
                         .border(1.dp, BrightYellow, RoundedCornerShape(4.dp))
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.KeyboardArrowUp,
-                        contentDescription = "Open Deployment",
-                        tint = BrightYellow
-                    )
+                    Icon(imageVector = Icons.Filled.KeyboardArrowUp, contentDescription = "Open", tint = BrightYellow)
                 }
             }
         }
 
-        // Select and Place Overlay (Tap to place, Drag to rotate)
         if (pendingDeployment != null) {
-            val activeFaction = if (deployingForPlayer1) viewModel.player1Faction else viewModel.player2Faction
             val context = LocalContext.current
             val flagBitmap = remember(activeFaction.flagResId) {
                 ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
@@ -357,42 +388,54 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.15f))
-                    .pointerInput(Unit) {
+                    .pointerInput(isP1) {
                         awaitEachGesture {
                             val down = awaitFirstDown()
-                            proxyPosition = down.position
-                            proxyRotation = 0f
 
-                            var dragEnded = false
-                            do {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull()
+                            val thirdWidth = size.width / 3f
+                            val allowedToPlace = if (isP1) {
+                                down.position.x <= thirdWidth
+                            } else {
+                                down.position.x >= (size.width - thirdWidth)
+                            }
 
-                                if (change != null && change.pressed) {
-                                    val dx = change.position.x - down.position.x
-                                    val dy = change.position.y - down.position.y
+                            if (allowedToPlace) {
+                                proxyPosition = down.position
+                                proxyRotation = 0f
 
-                                    if (dx * dx + dy * dy > 50) {
-                                        proxyRotation = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+                                var dragEnded = false
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull()
+
+                                    if (change != null && change.pressed) {
+                                        val dx = change.position.x - down.position.x
+                                        val dy = change.position.y - down.position.y
+
+                                        if (dx * dx + dy * dy > 50) {
+                                            proxyRotation = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+                                        }
+                                        change.consume()
+                                    } else if (change != null && !change.pressed) {
+                                        dragEnded = true
+                                        change.consume()
                                     }
-                                    change.consume()
-                                } else if (change != null && !change.pressed) {
-                                    dragEnded = true
-                                    change.consume()
-                                }
-                            } while (!dragEnded)
+                                } while (!dragEnded)
 
-                            viewModel.deployUnit(
-                                faction = activeFaction,
-                                unitClass = pendingDeployment!!.first,
-                                subtype = pendingDeployment!!.second,
-                                x = proxyPosition!!.x,
-                                y = proxyPosition!!.y,
-                                rotation = proxyRotation
-                            )
+                                viewModel.deployUnit(
+                                    faction = activeFaction,
+                                    unitClass = pendingDeployment!!.first,
+                                    subtype = pendingDeployment!!.second,
+                                    x = proxyPosition!!.x,
+                                    y = proxyPosition!!.y,
+                                    rotation = proxyRotation
+                                )
 
-                            pendingDeployment = null
-                            proxyPosition = null
+                                pendingDeployment = null
+                                proxyPosition = null
+                            } else {
+                                down.consume()
+                            }
                         }
                     }
             ) {
@@ -404,7 +447,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Tap to place, Drag to rotate", color = Color.White, modifier = Modifier.padding(end = 16.dp))
+                    Text("Tap green zone to place, drag to rotate", color = Color.White, modifier = Modifier.padding(end = 16.dp))
                     Button(
                         onClick = { pendingDeployment = null },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red)

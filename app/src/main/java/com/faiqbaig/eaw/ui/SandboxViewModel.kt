@@ -3,6 +3,7 @@ package com.faiqbaig.eaw.ui
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import com.faiqbaig.eaw.core.Faction
@@ -28,6 +29,8 @@ class SandboxViewModel : ViewModel() {
         private set
     var config by mutableStateOf(GameConfig())
         private set
+    var activeDeploymentPlayer by mutableIntStateOf(1)
+        private set
 
     var player1Faction by mutableStateOf(Faction.FRANCE)
         private set
@@ -40,6 +43,7 @@ class SandboxViewModel : ViewModel() {
     var matchVerdict by mutableStateOf("")
         private set
 
+
     // Configuration Modifiers
     fun updateConfig(newConfig: GameConfig) { config = newConfig }
     fun updatePlayer1Faction(faction: Faction) { player1Faction = faction }
@@ -48,11 +52,16 @@ class SandboxViewModel : ViewModel() {
     // Phase Transitions
     fun startDeployment() {
         units.clear()
+        activeDeploymentPlayer = 1
         currentPhase = GamePhase.DEPLOYMENT
     }
 
+    // New function to swap from P1 to P2
+    fun finishP1Deployment() {
+        activeDeploymentPlayer = 2
+    }
+
     fun startBattle() {
-        // Snapshot the total health for the post-battle screen
         p1InitialHp = units.filter { it.faction == player1Faction }.sumOf { it.maxHp }
         p2InitialHp = units.filter { it.faction == player2Faction }.sumOf { it.maxHp }
         currentPhase = GamePhase.BATTLE

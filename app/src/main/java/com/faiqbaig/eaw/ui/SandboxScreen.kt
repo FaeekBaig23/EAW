@@ -511,6 +511,10 @@ fun PostBattleOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
 
     Dialog(onDismissRequest = onExit) {
         Surface(
+            // Expanded width to prevent cramping and accommodate details cleanly
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .wrapContentHeight(),
             shape = RoundedCornerShape(12.dp),
             color = Color(0xFF1E221E),
             border = BorderStroke(2.dp, BrightYellow)
@@ -520,23 +524,50 @@ fun PostBattleOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text("BATTLE CONCLUDED", color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-                Text(viewModel.matchVerdict, color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(vertical = 8.dp))
+                Text(
+                    text = viewModel.matchVerdict,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(viewModel.player1Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold)
-                        Text("Initial Strength: ${viewModel.p1InitialHp}", color = Color.White)
-                        Text("Casualties (HP): $p1Loss", color = Color.Red)
-                        Text("Remaining: ${viewModel.getP1CurrentHp()}", color = Color.Green)
+                // Faction Stats Comparison Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    // Player 1 Summary
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(viewModel.player1Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Initial Strength: ${viewModel.p1InitialHp}", color = Color.White, fontSize = 13.sp)
+                        Text("Casualties: $p1Loss", color = Color.Red, fontSize = 13.sp)
+                        Text("Remaining: ${viewModel.getP1CurrentHp()}", color = Color.Green, fontSize = 13.sp)
                     }
 
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(viewModel.player2Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold)
-                        Text("Initial Strength: ${viewModel.p2InitialHp}", color = Color.White)
-                        Text("Casualties (HP): $p2Loss", color = Color.Red)
-                        Text("Remaining: ${viewModel.getP2CurrentHp()}", color = Color.Green)
+                    // Divider between columns for structured layout
+                    Divider(
+                        color = Color.Gray.copy(alpha = 0.4f),
+                        modifier = Modifier
+                            .height(80.dp)
+                            .width(1.dp)
+                    )
+
+                    // Player 2 Summary
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(viewModel.player2Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Initial Strength: ${viewModel.p2InitialHp}", color = Color.White, fontSize = 13.sp)
+                        Text("Casualties: $p2Loss", color = Color.Red, fontSize = 13.sp)
+                        Text("Remaining: ${viewModel.getP2CurrentHp()}", color = Color.Green, fontSize = 13.sp)
                     }
                 }
 
@@ -544,7 +575,8 @@ fun PostBattleOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
 
                 Button(
                     onClick = onExit,
-                    colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black),
+                    modifier = Modifier.fillMaxWidth(0.6f)
                 ) {
                     Text("Return to Menu", fontWeight = FontWeight.Bold)
                 }

@@ -27,6 +27,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -38,11 +39,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.faiqbaig.eaw.core.Faction
 import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitSubtype
 import kotlin.math.atan2
-
 
 @Composable
 fun SandboxScreen(
@@ -63,13 +64,13 @@ fun SandboxScreen(
             else -> viewModel.units // Show all units during Battle and Post-Battle
         }
 
-        // 1. The Game Map (Always rendered at the bottom layer)
+        // 1. Map Layer
         SandboxMapCanvas(
             units = visibleUnits,
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Phase-Based Overlays Layered over the Map
+        // 2. Overlay Layer
         when (viewModel.currentPhase) {
             GamePhase.SETUP -> {
                 SetupPhaseOverlay(viewModel, onExitToMenu)
@@ -223,7 +224,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
 
     Box(modifier = Modifier.fillMaxSize()) {
 
-        // 1. Draw Visual Deployment Zones
+        // 1. Draw Deployment Zones
         Canvas(modifier = Modifier.fillMaxSize()) {
             val thirdWidth = size.width / 3f
             val twoThirdsWidth = (size.width * 2) / 3f
@@ -243,6 +244,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
             }
         }
 
+        // Top Status & Actions Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -281,6 +283,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
             }
         }
 
+        // Roster Selection Panel
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -301,7 +304,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "Deploying: ${activeFaction.name}",
+                                    text = "Deploying: ${activeFaction.name.replace("_", " ")}",
                                     color = BrightYellow,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(start = 8.dp)
@@ -378,6 +381,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
             }
         }
 
+        // Unit Placement Preview & Gesture Input
         if (pendingDeployment != null) {
             val context = LocalContext.current
             val flagBitmap = remember(activeFaction.flagResId) {
@@ -488,14 +492,14 @@ fun BattlePhaseOverlay(viewModel: SandboxViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Button(
-                onClick = { viewModel.endBattle("${viewModel.player2Faction.name} Wins by Surrender!") },
+                onClick = { viewModel.endBattle("${viewModel.player2Faction.name.replace("_", " ")} Wins by Surrender!") },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
             ) {
                 Text("P1 Surrender", color = Color.White)
             }
 
             Button(
-                onClick = { viewModel.endBattle("${viewModel.player1Faction.name} Wins by Surrender!") },
+                onClick = { viewModel.endBattle("${viewModel.player1Faction.name.replace("_", " ")} Wins by Surrender!") },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
             ) {
                 Text("P2 Surrender", color = Color.White)
@@ -505,82 +509,272 @@ fun BattlePhaseOverlay(viewModel: SandboxViewModel) {
 }
 
 @Composable
-fun PostBattleOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
+fun PostBattleOverlay(
+    viewModel: SandboxViewModel,
+    onExit: () -> Unit
+) {
     val p1Loss = viewModel.p1InitialHp - viewModel.getP1CurrentHp()
     val p2Loss = viewModel.p2InitialHp - viewModel.getP2CurrentHp()
 
-    Dialog(onDismissRequest = onExit) {
+    val p1FactionName = viewModel.player1Faction.name.replace("_", " ")
+    val p2FactionName = viewModel.player2Faction.name.replace("_", " ")
+    val formattedVerdict = viewModel.matchVerdict.replace("_", " ")
+
+    val p1Commanders = viewModel.units
+        .filter { it.faction == viewModel.player1Faction && it.unitClass == UnitClass.COMMANDER }
+        .map { Pair(it.subtype.toRomanNumeral(), it.commanderName ?: "Field Command") }
+        .ifEmpty { listOf(Pair("I", "Field Command")) }
+
+    val p2Commanders = viewModel.units
+        .filter { it.faction == viewModel.player2Faction && it.unitClass == UnitClass.COMMANDER }
+        .map { Pair(it.subtype.toRomanNumeral(), it.commanderName ?: "Field Command") }
+        .ifEmpty { listOf(Pair("I", "Field Command")) }
+
+    Dialog(
+        onDismissRequest = onExit,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
-            // Expanded width to prevent cramping and accommodate details cleanly
             modifier = Modifier
-                .fillMaxWidth(0.95f)
+                .fillMaxWidth(0.82f) // Slightly narrower to avoid covering full screen edges
                 .wrapContentHeight(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             color = Color(0xFF1E221E),
-            border = BorderStroke(2.dp, BrightYellow)
+            border = BorderStroke(1.5.dp, BrightYellow)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier.padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("BATTLE CONCLUDED", color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-                Text(
-                    text = viewModel.matchVerdict,
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(vertical = 8.dp)
+                // Result Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp, start = 2.dp, end = 2.dp),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Result",
+                        fontWeight = FontWeight.Bold,
+                        color = BrightYellow,
+                        fontSize = 13.sp,
+                        modifier = Modifier.width(70.dp)
+                    )
+                    Text(
+                        text = formattedVerdict,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                }
+
+                // 1. Belligerents
+                InfoboxHeader("Belligerents")
+                InfoboxTwoColumnRow(
+                    leftContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = viewModel.player1Faction.flagResId),
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp, 16.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(p1FactionName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    },
+                    rightContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = viewModel.player2Faction.flagResId),
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp, 16.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(p2FactionName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                // 2. Commanders and leaders
+                InfoboxHeader("Commanders and leaders")
+                InfoboxTwoColumnRow(
+                    leftContent = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            p1Commanders.forEach { (romanLevel, name) ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Image(
+                                        painter = painterResource(id = viewModel.player1Faction.flagResId),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp, 10.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("$romanLevel $name", color = Color(0xFFBDC3C7), fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    },
+                    rightContent = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            p2Commanders.forEach { (romanLevel, name) ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Image(
+                                        painter = painterResource(id = viewModel.player2Faction.flagResId),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp, 10.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("$romanLevel $name", color = Color(0xFFBDC3C7), fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                )
 
-                // Faction Stats Comparison Row
+                // 3. Strength
+                InfoboxHeader("Strength")
+                InfoboxTwoColumnRow(
+                    leftContent = {
+                        Text("${viewModel.p1InitialHp}", color = Color.White, fontSize = 12.sp)
+                    },
+                    rightContent = {
+                        Text("${viewModel.p2InitialHp}", color = Color.White, fontSize = 12.sp)
+                    }
+                )
+
+                // 4. Casualties and losses
+                InfoboxHeader("Casualties and losses")
+                InfoboxTwoColumnRow(
+                    leftContent = {
+                        Text("$p1Loss", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                    },
+                    rightContent = {
+                        Text("$p2Loss", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Actions Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceAround
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Player 1 Summary
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(viewModel.player1Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Initial Strength: ${viewModel.p1InitialHp}", color = Color.White, fontSize = 13.sp)
-                        Text("Casualties: $p1Loss", color = Color.Red, fontSize = 13.sp)
-                        Text("Remaining: ${viewModel.getP1CurrentHp()}", color = Color.Green, fontSize = 13.sp)
-                    }
-
-                    // Divider between columns for structured layout
-                    Divider(
-                        color = Color.Gray.copy(alpha = 0.4f),
+                    OutlinedButton(
+                        onClick = { viewModel.startSetup() },
                         modifier = Modifier
-                            .height(80.dp)
-                            .width(1.dp)
-                    )
-
-                    // Player 2 Summary
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
+                            .weight(1f)
+                            .height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        border = BorderStroke(1.dp, BrightYellow),
+                        shape = RoundedCornerShape(4.dp)
                     ) {
-                        Text(viewModel.player2Faction.name, color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Initial Strength: ${viewModel.p2InitialHp}", color = Color.White, fontSize = 13.sp)
-                        Text("Casualties: $p2Loss", color = Color.Red, fontSize = 13.sp)
-                        Text("Remaining: ${viewModel.getP2CurrentHp()}", color = Color.Green, fontSize = 13.sp)
+                        Text("Reset", color = BrightYellow, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
-                }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                    Button(
+                        onClick = { viewModel.startDeployment() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text("Redeploy", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
 
-                Button(
-                    onClick = onExit,
-                    colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black),
-                    modifier = Modifier.fillMaxWidth(0.6f)
-                ) {
-                    Text("Return to Menu", fontWeight = FontWeight.Bold)
+                    OutlinedButton(
+                        onClick = onExit,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        border = BorderStroke(1.dp, Color.Red),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text("Menu", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
                 }
             }
+        }
+    }
+}
+
+private fun UnitSubtype.toRomanNumeral(): String = when (this) {
+    UnitSubtype.LEVEL_5 -> "V"
+    UnitSubtype.LEVEL_4 -> "IV"
+    UnitSubtype.LEVEL_3 -> "III"
+    UnitSubtype.LEVEL_2 -> "II"
+    UnitSubtype.LEVEL_1 -> "I"
+    else -> "I"
+}
+
+@Composable
+private fun InfoboxHeader(title: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 2.dp)
+            .background(Color(0xFF2C3E50), RoundedCornerShape(2.dp))
+            .padding(vertical = 2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = title,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp
+        )
+    }
+}
+
+@Composable
+private fun InfoboxTwoColumnRow(
+    leftContent: @Composable () -> Unit,
+    rightContent: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 6.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            leftContent()
+        }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(1.dp)
+        ) {
+            drawLine(
+                color = Color.Gray.copy(alpha = 0.5f),
+                start = Offset(0f, 0f),
+                end = Offset(0f, size.height),
+                strokeWidth = 1.5f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f)
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 6.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            rightContent()
         }
     }
 }

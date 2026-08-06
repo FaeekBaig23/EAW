@@ -50,6 +50,10 @@ class SandboxViewModel : ViewModel() {
     fun updatePlayer2Faction(faction: Faction) { player2Faction = faction }
 
     // Phase Transitions
+    fun startSetup() {
+        units.clear()
+        currentPhase = GamePhase.SETUP
+    }
     fun startDeployment() {
         units.clear()
         activeDeploymentPlayer = 1

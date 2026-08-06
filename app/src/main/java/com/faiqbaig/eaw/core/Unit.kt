@@ -17,6 +17,17 @@ enum class UnitClass { INFANTRY, CAVALRY, ARTILLERY, COMMANDER }
 
 enum class UnitSubtype { LIGHT, LINE, GRENADIER, HEAVY, LEVEL_1, LEVEL_2, LEVEL_3, LEVEL_4, LEVEL_5, NONE }
 
+fun UnitSubtype.toRomanNumeral(): String {
+    return when (this) {
+        UnitSubtype.LEVEL_1 -> "I"
+        UnitSubtype.LEVEL_2 -> "II"
+        UnitSubtype.LEVEL_3 -> "III"
+        UnitSubtype.LEVEL_4 -> "IV"
+        UnitSubtype.LEVEL_5 -> "V"
+        else -> ""
+    }
+}
+
 data class GameUnit(
     val id: String = UUID.randomUUID().toString(),
     val faction: Faction,
@@ -25,17 +36,15 @@ data class GameUnit(
     var x: Float,
     var y: Float,
     var rotation: Float = 0f,
-    val commanderName: String? = null
+    val commanderName: String? = null,
+    var corpId: String? = null // Links to a Commander's ID
 ) {
-    // 1. Fetch the locked v1 stats for this specific unit type
     val baseStats: BaseUnitStats = getBaseStatsForUnit(unitClass, subtype)
 
-    // 2. Mutable state variables initialized from base stats
     var currentHp: Int = baseStats.maxHp
     var currentMorale: Int? = baseStats.maxMorale
     var currentAmmo: Int? = baseStats.maxAmmo
 
-    // 3. Combat tracking timers and state
     var reloadTimer: Float = 0f
     var meleeTickTimer: Float = 0f
     var isFirstChargeTick: Boolean = true

@@ -45,6 +45,11 @@ import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitSubtype
 import com.faiqbaig.eaw.core.getBaseStatsForUnit
 import kotlin.math.atan2
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 
 @Composable
 fun SandboxScreen(
@@ -237,13 +242,19 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
 @Composable
 fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
     var showDeploymentPanel by remember { mutableStateOf(false) }
-    var pendingDeployment by remember { mutableStateOf<Pair<UnitClass, UnitSubtype>?>(null) }
-    var proxyPosition by remember { mutableStateOf<Offset?>(null) }
-    var proxyRotation by remember { mutableStateOf(0f) }
+    var pendingRosterSelection by remember { mutableStateOf<Pair<UnitClass, UnitSubtype>?>(null) }
 
     val isP1 = viewModel.activeDeploymentPlayer == 1
     val activeFaction = if (isP1) viewModel.player1Faction else viewModel.player2Faction
     val remainingFunds = if (isP1) viewModel.getPlayer1RemainingFunds() else viewModel.getPlayer2RemainingFunds()
+
+    val context = LocalContext.current
+    val flagBitmap = remember(activeFaction.flagResId) {
+        ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
+    }
+
+    // Deployable commanders for the current faction
+    val availableCommanders = viewModel.units.filter { it.faction == activeFaction && it.unitClass == UnitClass.COMMANDER }
 
     val deployableRoster = listOf(
         Pair(UnitClass.COMMANDER, UnitSubtype.LEVEL_5),
@@ -261,73 +272,226 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
 
     Box(modifier = Modifier.fillMaxSize()) {
 
-        // 1. Draw Deployment Zones
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        // --- MAP CANVAS ---
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(isP1) {
+                    detectTapGestures { offset ->
+                        val tappedUnit = viewModel.units.find {
+                            val dx = it.x - offset.x
+                            val dy = it.y - offset.y
+                            (dx * dx + dy * dy) < 2500
+                        }
+
+                        if (tappedUnit != null && tappedUnit.faction == activeFaction) {
+                            viewModel.selectUnit(tappedUnit)
+                        }
+                        else if (pendingRosterSelection != null && viewModel.pendingPlacementUnit == null) {
+                            val thirdWidth = size.width / 3f
+                            val allowedToPlace = if (isP1) offset.x <= thirdWidth else offset.x >= (size.width - thirdWidth)
+
+                            if (allowedToPlace) {
+                                viewModel.stageUnitPlacement(
+                                    faction = activeFaction,
+                                    unitClass = pendingRosterSelection!!.first,
+                                    subtype = pendingRosterSelection!!.second,
+                                    x = offset.x,
+                                    y = offset.y
+                                )
+                                pendingRosterSelection = null
+                            }
+                        } else {
+                            viewModel.selectUnit(null)
+                        }
+                    }
+                }
+        ) {
             val thirdWidth = size.width / 3f
             val twoThirdsWidth = (size.width * 2) / 3f
 
-            drawRect(
-                color = Color.Red.copy(alpha = 0.15f),
-                topLeft = Offset(thirdWidth, 0f),
-                size = Size(thirdWidth, size.height)
-            )
+            // 1. Draw deployment zones
+            drawRect(color = Color.Red.copy(alpha = 0.15f), topLeft = Offset(thirdWidth, 0f), size = Size(thirdWidth, size.height))
 
             if (isP1) {
+                // P1 Green Zone
                 drawRect(color = Color.Green.copy(alpha = 0.1f), size = Size(thirdWidth, size.height))
                 drawLine(color = Color.Green, start = Offset(thirdWidth, 0f), end = Offset(thirdWidth, size.height), strokeWidth = 3f)
+
+                // Fog of War hiding P2 Zone
+                drawRect(color = Color.Black.copy(alpha = 0.85f), topLeft = Offset(twoThirdsWidth, 0f), size = Size(thirdWidth, size.height))
             } else {
+                // P2 Green Zone
                 drawRect(color = Color.Green.copy(alpha = 0.1f), topLeft = Offset(twoThirdsWidth, 0f), size = Size(thirdWidth, size.height))
                 drawLine(color = Color.Green, start = Offset(twoThirdsWidth, 0f), end = Offset(twoThirdsWidth, size.height), strokeWidth = 3f)
+
+                // Fog of War hiding P1 Zone
+                drawRect(color = Color.Black.copy(alpha = 0.85f), size = Size(thirdWidth, size.height))
+            }
+
+            // 2. Draw ONLY the active player's confirmed units
+            viewModel.units.filter { it.faction == activeFaction }.forEach { unit ->
+                val isSelected = unit.id == viewModel.selectedUnitId ||
+                        (viewModel.selectedCorpId != null && unit.corpId == viewModel.selectedCorpId)
+
+                if (isSelected) {
+                    drawCircle(
+                        color = unit.faction.color,
+                        radius = 45f,
+                        center = Offset(unit.x, unit.y),
+                        style = Stroke(width = 4f)
+                    )
+                }
+
+                withTransform({
+                    translate(unit.x, unit.y)
+                    if (unit.unitClass != UnitClass.COMMANDER) {
+                        // FIX: Explicitly set pivot to Offset.Zero so it rotates on itself
+                        rotate(unit.rotation, pivot = Offset.Zero)
+                    }
+                }) {
+                    drawTacticalSprite(unit.unitClass, unit.subtype, unit.faction.color, flagBitmap, unit.commanderName)
+                }
+            }
+
+            // 3. Draw pending placement unit
+            viewModel.pendingPlacementUnit?.let { pendingUnit ->
+                withTransform({
+                    translate(pendingUnit.x, pendingUnit.y)
+                    if (pendingUnit.unitClass != UnitClass.COMMANDER) {
+                        // FIX: Explicitly set pivot to Offset.Zero here as well
+                        rotate(pendingUnit.rotation, pivot = Offset.Zero)
+                    }
+                }) {
+                    drawTacticalSprite(pendingUnit.unitClass, pendingUnit.subtype, pendingUnit.faction.color.copy(alpha = 0.7f), flagBitmap, pendingUnit.commanderName)
+                }
             }
         }
 
-        // Top Status & Actions Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .align(Alignment.TopCenter),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "P${viewModel.activeDeploymentPlayer} DEPLOYMENT",
-                color = BrightYellow,
-                fontWeight = FontWeight.Bold,
+        // --- TOP BAR & ACTIVE COMMANDER SELECTOR ---
+        Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+            Row(
                 modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                    .padding(8.dp)
-            )
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "P${viewModel.activeDeploymentPlayer} DEPLOYMENT",
+                    color = BrightYellow,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                        .padding(8.dp)
+                )
 
-            if (isP1) {
-                Button(
-                    onClick = {
-                        viewModel.finishP1Deployment()
-                        pendingDeployment = null
-                        showDeploymentPanel = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
-                ) {
-                    Text("End P1 Turn", fontWeight = FontWeight.Bold)
+                if (isP1) {
+                    Button(
+                        onClick = {
+                            viewModel.finishP1Deployment()
+                            showDeploymentPanel = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
+                    ) {
+                        Text("End P1 Turn", fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Button(
+                        onClick = { viewModel.startBattle() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
+                    ) {
+                        Text("Start Battle", fontWeight = FontWeight.Bold)
+                    }
                 }
-            } else {
-                Button(
-                    onClick = { viewModel.startBattle() },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
+            }
+
+            // Active Commander Selection UI
+            if (availableCommanders.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Start Battle", fontWeight = FontWeight.Bold)
+                    items(availableCommanders) { cmdr ->
+                        val isActive = viewModel.activeCommanderId == cmdr.id
+                        Box(
+                            modifier = Modifier
+                                .border(
+                                    width = if (isActive) 2.dp else 1.dp,
+                                    color = if (isActive) BrightYellow else Color.Gray,
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .background(if (isActive) Color(0xFF2C3E50) else Color.Transparent)
+                                .clickable { viewModel.setActiveCommander(if (isActive) null else cmdr.id) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "Corp: ${cmdr.commanderName ?: "General"}",
+                                color = if (isActive) BrightYellow else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        // Roster Selection Panel
+        // --- PENDING ACTION OVERLAY (Rotate / Delete / Confirm) ---
+        if (viewModel.pendingPlacementUnit != null) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 80.dp)
+                    .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                    .border(1.dp, BrightYellow, RoundedCornerShape(8.dp))
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Hide rotate button entirely if it is a Commander
+                if (viewModel.pendingPlacementUnit!!.unitClass != UnitClass.COMMANDER) {
+                    IconButton(onClick = { viewModel.rotatePendingUnit() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Rotate", tint = Color.Cyan)
+                    }
+                }
+                IconButton(onClick = { viewModel.cancelPendingPlacement() }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Color.Red)
+                }
+                IconButton(onClick = {
+                    viewModel.confirmPendingPlacement()
+                    showDeploymentPanel = true
+                }) {
+                    Icon(Icons.Filled.Check, contentDescription = "Confirm", tint = Color.Green)
+                }
+            }
+        }
+
+        // --- NEW: DELETE CONFIRMED UNIT BUTTON ---
+        if (viewModel.selectedUnitId != null && viewModel.pendingPlacementUnit == null) {
+            Button(
+                onClick = { viewModel.deleteSelectedUnit() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 100.dp, end = 16.dp) // Sits above the roster
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Delete Selected", tint = Color.White)
+                Spacer(Modifier.width(8.dp))
+                Text("Delete Unit", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // --- ROSTER SELECTION PANEL ---
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (showDeploymentPanel) {
+            if (showDeploymentPanel && viewModel.pendingPlacementUnit == null) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = Color.Black.copy(alpha = 0.9f),
@@ -358,11 +522,6 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                             }
                         }
 
-                        val context = LocalContext.current
-                        val flagBitmap = remember(activeFaction.flagResId) {
-                            ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
-                        }
-
                         LazyRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -371,13 +530,15 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                             items(deployableRoster) { (unitClass, subtype) ->
                                 val stats = getBaseStatsForUnit(unitClass, subtype)
                                 val canAfford = remainingFunds >= stats.cost
+                                val isSelectedToPlace = pendingRosterSelection?.first == unitClass && pendingRosterSelection?.second == subtype
 
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .alpha(if (canAfford) 1f else 0.4f)
+                                        .background(if (isSelectedToPlace) Color.White.copy(alpha = 0.2f) else Color.Transparent, RoundedCornerShape(4.dp))
                                         .clickable(enabled = canAfford) {
-                                            pendingDeployment = Pair(unitClass, subtype)
+                                            pendingRosterSelection = Pair(unitClass, subtype)
                                             showDeploymentPanel = false
                                         }
                                         .padding(4.dp)
@@ -411,7 +572,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                         }
                     }
                 }
-            } else {
+            } else if (viewModel.pendingPlacementUnit == null) {
                 IconButton(
                     onClick = { showDeploymentPanel = true },
                     modifier = Modifier
@@ -421,108 +582,6 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                         .border(1.dp, BrightYellow, RoundedCornerShape(4.dp))
                 ) {
                     Icon(imageVector = Icons.Filled.KeyboardArrowUp, contentDescription = "Open", tint = BrightYellow)
-                }
-            }
-        }
-
-        // Unit Placement Preview & Gesture Input
-        if (pendingDeployment != null) {
-            val context = LocalContext.current
-            val flagBitmap = remember(activeFaction.flagResId) {
-                ImageBitmap.imageResource(context.resources, activeFaction.flagResId)
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.15f))
-                    .pointerInput(isP1) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-
-                            val thirdWidth = size.width / 3f
-                            val allowedToPlace = if (isP1) {
-                                down.position.x <= thirdWidth
-                            } else {
-                                down.position.x >= (size.width - thirdWidth)
-                            }
-
-                            if (allowedToPlace) {
-                                proxyPosition = down.position
-                                proxyRotation = 0f
-
-                                var dragEnded = false
-                                do {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull()
-
-                                    if (change != null && change.pressed) {
-                                        val dx = change.position.x - down.position.x
-                                        val dy = change.position.y - down.position.y
-
-                                        if (dx * dx + dy * dy > 50) {
-                                            proxyRotation = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-                                        }
-                                        change.consume()
-                                    } else if (change != null && !change.pressed) {
-                                        dragEnded = true
-                                        change.consume()
-                                    }
-                                } while (!dragEnded)
-
-                                viewModel.deployUnit(
-                                    faction = activeFaction,
-                                    unitClass = pendingDeployment!!.first,
-                                    subtype = pendingDeployment!!.second,
-                                    x = proxyPosition!!.x,
-                                    y = proxyPosition!!.y,
-                                    rotation = proxyRotation
-                                )
-
-                                pendingDeployment = null
-                                proxyPosition = null
-                                showDeploymentPanel = true // Re-open panel automatically to speed up deployment
-                            } else {
-                                down.consume()
-                            }
-                        }
-                    }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 80.dp)
-                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Tap green zone to place, drag to rotate", color = Color.White, modifier = Modifier.padding(end = 16.dp))
-                    Button(
-                        onClick = {
-                            pendingDeployment = null
-                            showDeploymentPanel = true
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                    ) {
-                        Text("Cancel", color = Color.White)
-                    }
-                }
-
-                if (proxyPosition != null) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        withTransform({
-                            translate(proxyPosition!!.x, proxyPosition!!.y)
-                            rotate(proxyRotation)
-                        }) {
-                            drawTacticalSprite(
-                                unitClass = pendingDeployment!!.first,
-                                subtype = pendingDeployment!!.second,
-                                factionColor = activeFaction.color,
-                                flagBitmap = flagBitmap,
-                                commanderName = null
-                            )
-                        }
-                    }
                 }
             }
         }

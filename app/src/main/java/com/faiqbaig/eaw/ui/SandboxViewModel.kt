@@ -18,7 +18,7 @@ enum class GamePhase { SETUP, DEPLOYMENT, BATTLE, POST_BATTLE }
 data class GameConfig(
     val unitsPerSide: Int = 10,
     val commandersPerSide: Int = 2,
-    val fundsPerPlayer: Int = 3000, // New budget variable
+    val fundsPerPlayer: Int = 3000,
     val infiniteAmmo: Boolean = false,
     val infiniteMorale: Boolean = false
 )
@@ -45,12 +45,23 @@ class SandboxViewModel : ViewModel() {
     var matchVerdict by mutableStateOf("")
         private set
 
-    // Configuration Modifiers
+    // --- NEW: Corp & Selection States ---
+    var activeCommanderId by mutableStateOf<String?>(null)
+        private set
+
+    var selectedUnitId by mutableStateOf<String?>(null)
+        private set
+    var selectedCorpId by mutableStateOf<String?>(null)
+        private set
+
+    // Pending placement state
+    var pendingPlacementUnit by mutableStateOf<GameUnit?>(null)
+        private set
+
     fun updateConfig(newConfig: GameConfig) { config = newConfig }
     fun updatePlayer1Faction(faction: Faction) { player1Faction = faction }
     fun updatePlayer2Faction(faction: Faction) { player2Faction = faction }
 
-    // Phase Transitions
     fun startSetup() {
         units.clear()
         currentPhase = GamePhase.SETUP
@@ -59,17 +70,19 @@ class SandboxViewModel : ViewModel() {
     fun startDeployment() {
         units.clear()
         activeDeploymentPlayer = 1
+        resetSelectionStates()
         currentPhase = GamePhase.DEPLOYMENT
     }
 
     fun finishP1Deployment() {
         activeDeploymentPlayer = 2
+        resetSelectionStates()
     }
 
     fun startBattle() {
-        // Updated to pull maxHp from baseStats
         p1InitialHp = units.filter { it.faction == player1Faction }.sumOf { it.baseStats.maxHp }
         p2InitialHp = units.filter { it.faction == player2Faction }.sumOf { it.baseStats.maxHp }
+        resetSelectionStates()
         currentPhase = GamePhase.BATTLE
     }
 
@@ -78,7 +91,24 @@ class SandboxViewModel : ViewModel() {
         currentPhase = GamePhase.POST_BATTLE
     }
 
-    // Deployment & Budget Logic
+    private fun resetSelectionStates() {
+        activeCommanderId = null
+        selectedUnitId = null
+        selectedCorpId = null
+        pendingPlacementUnit = null
+    }
+
+    // --- Selection Logic ---
+    fun selectUnit(unit: GameUnit?) {
+        selectedUnitId = unit?.id
+        selectedCorpId = if (unit?.unitClass == UnitClass.COMMANDER) unit.id else null
+    }
+
+    fun setActiveCommander(commanderId: String?) {
+        activeCommanderId = commanderId
+    }
+
+    // --- Budget Logic ---
     fun getDeployedUnitCount(faction: Faction): Int =
         units.count { it.faction == faction && it.unitClass != UnitClass.COMMANDER }
 
@@ -95,38 +125,81 @@ class SandboxViewModel : ViewModel() {
         return config.fundsPerPlayer - spent
     }
 
-    fun deployUnit(faction: Faction, unitClass: UnitClass, subtype: UnitSubtype, x: Float, y: Float, rotation: Float) {
-        if (currentPhase != GamePhase.DEPLOYMENT) return
+    // --- Staged Deployment Logic ---
+    fun stageUnitPlacement(faction: Faction, unitClass: UnitClass, subtype: UnitSubtype, x: Float, y: Float): Boolean {
+        // 1. Prevent Overlap (Requires at least 60 pixels of space between unit centers)
+        val minOverlapSquared = 3600f // 60px * 60px
+        val hasOverlap = units.any {
+            val dx = it.x - x
+            val dy = it.y - y
+            (dx * dx + dy * dy) < minOverlapSquared
+        }
+        if (hasOverlap) return false // Blocks placement if too close to an existing unit
 
-        // 1. Enforce Numeric Limits
+        // 2. Enforce Numeric Limits
         if (unitClass == UnitClass.COMMANDER) {
-            if (getDeployedCommanderCount(faction) >= config.commandersPerSide) return
+            if (getDeployedCommanderCount(faction) >= config.commandersPerSide) return false
         } else {
-            if (getDeployedUnitCount(faction) >= config.unitsPerSide) return
+            if (getDeployedUnitCount(faction) >= config.unitsPerSide) return false
         }
 
-        // 2. Enforce Budget Limits
+        // 3. Enforce Budget Limits
         val stats = getBaseStatsForUnit(unitClass, subtype)
         val currentFunds = if (faction == player1Faction) getPlayer1RemainingFunds() else getPlayer2RemainingFunds()
+        if (currentFunds < stats.cost) return false
 
-        if (currentFunds < stats.cost) return // Block deployment if insufficient funds
-
-        // 3. Create Unit
         val usedNames = units.mapNotNull { it.commanderName }.toSet()
-        val newUnit = UnitFactory.createDeployedUnit(faction, unitClass, subtype, x, y, rotation, usedNames)
+        val newUnit = UnitFactory.createDeployedUnit(faction, unitClass, subtype, x, y, 0f, usedNames)
 
-        // 4. Apply Modifiers (Updated to use new state variables)
-        if (config.infiniteAmmo && newUnit.currentAmmo != null) {
-            newUnit.currentAmmo = 9999
-        }
-        if (config.infiniteMorale && newUnit.currentMorale != null) {
-            newUnit.currentMorale = 9999
+        if (unitClass != UnitClass.COMMANDER) {
+            newUnit.corpId = activeCommanderId
         }
 
-        units.add(newUnit)
+        pendingPlacementUnit = newUnit
+        return true
     }
 
-    // Helper methods for stats (Updated to use currentHp)
+    fun rotatePendingUnit() {
+        // Only allow rotation if the unit is NOT a commander
+        pendingPlacementUnit?.let { unit ->
+            if (unit.unitClass != UnitClass.COMMANDER) {
+                // Use .copy() to force the mutable state to recompose the UI
+                pendingPlacementUnit = unit.copy(rotation = (unit.rotation + 90f) % 360f)
+            }
+        }
+    }
+
+    // --- NEW: Delete Confirmed Unit ---
+    fun deleteSelectedUnit() {
+        val unitToRemove = units.find { it.id == selectedUnitId } ?: return
+        units.remove(unitToRemove)
+
+        // Clear active references if we deleted the currently active commander
+        if (activeCommanderId == unitToRemove.id) activeCommanderId = null
+        selectedUnitId = null
+        selectedCorpId = null
+    }
+
+    fun cancelPendingPlacement() {
+        pendingPlacementUnit = null
+    }
+
+    fun confirmPendingPlacement() {
+        val unit = pendingPlacementUnit ?: return
+
+        if (config.infiniteAmmo && unit.currentAmmo != null) unit.currentAmmo = 9999
+        if (config.infiniteMorale && unit.currentMorale != null) unit.currentMorale = 9999
+
+        units.add(unit)
+
+        // Auto-select newly placed commanders to speed up flow
+        if (unit.unitClass == UnitClass.COMMANDER) {
+            activeCommanderId = unit.id
+        }
+
+        pendingPlacementUnit = null
+    }
+
     fun getP1CurrentHp() = units.filter { it.faction == player1Faction }.sumOf { it.currentHp }
     fun getP2CurrentHp() = units.filter { it.faction == player2Faction }.sumOf { it.currentHp }
 }

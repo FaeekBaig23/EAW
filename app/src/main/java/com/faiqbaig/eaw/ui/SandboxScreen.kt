@@ -43,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.faiqbaig.eaw.core.Faction
 import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitSubtype
+import com.faiqbaig.eaw.core.getBaseStatsForUnit
 import kotlin.math.atan2
 
 @Composable
@@ -91,6 +92,7 @@ fun SandboxScreen(
 @Composable
 fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
     var unitsText by remember { mutableStateOf(viewModel.config.unitsPerSide.toString()) }
+    var fundsText by remember { mutableStateOf(viewModel.config.fundsPerPlayer.toString()) }
     var commandersPerSide by remember { mutableFloatStateOf(viewModel.config.commandersPerSide.toFloat().coerceIn(0f, 4f)) }
     var infAmmo by remember { mutableStateOf(viewModel.config.infiniteAmmo) }
     var infMorale by remember { mutableStateOf(viewModel.config.infiniteMorale) }
@@ -128,6 +130,7 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(24.dp))
 
+                // Unit Cap Input
                 OutlinedTextField(
                     value = unitsText,
                     onValueChange = { newValue ->
@@ -140,6 +143,29 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
                         }
                     },
                     label = { Text("Units per side (Max 30)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = BrightYellow,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = BrightYellow,
+                        unfocusedLabelColor = Color.Gray
+                    ),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Funds Budget Input
+                OutlinedTextField(
+                    value = fundsText,
+                    onValueChange = { newValue ->
+                        val filtered = newValue.filter { it.isDigit() }
+                        fundsText = filtered
+                    },
+                    label = { Text("Funds per player") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
@@ -185,7 +211,17 @@ fun SetupPhaseOverlay(viewModel: SandboxViewModel, onExit: () -> Unit) {
                     Button(
                         onClick = {
                             val finalUnits = unitsText.toIntOrNull() ?: 10
-                            viewModel.updateConfig(GameConfig(finalUnits, commandersPerSide.toInt(), infAmmo, infMorale))
+                            val finalFunds = fundsText.toIntOrNull() ?: 3000
+
+                            viewModel.updateConfig(
+                                GameConfig(
+                                    unitsPerSide = finalUnits,
+                                    commandersPerSide = commandersPerSide.toInt(),
+                                    fundsPerPlayer = finalFunds,
+                                    infiniteAmmo = infAmmo,
+                                    infiniteMorale = infMorale
+                                )
+                            )
                             viewModel.startDeployment()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = BrightYellow, contentColor = Color.Black)
@@ -207,6 +243,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
 
     val isP1 = viewModel.activeDeploymentPlayer == 1
     val activeFaction = if (isP1) viewModel.player1Faction else viewModel.player2Faction
+    val remainingFunds = if (isP1) viewModel.getPlayer1RemainingFunds() else viewModel.getPlayer2RemainingFunds()
 
     val deployableRoster = listOf(
         Pair(UnitClass.COMMANDER, UnitSubtype.LEVEL_5),
@@ -302,18 +339,16 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.padding(start = 8.dp)) {
                                 Text(
                                     text = "Deploying: ${activeFaction.name.replace("_", " ")}",
                                     color = BrightYellow,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(start = 8.dp)
+                                    fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.width(16.dp))
                                 val uCount = viewModel.getDeployedUnitCount(activeFaction)
                                 val cCount = viewModel.getDeployedCommanderCount(activeFaction)
                                 Text(
-                                    text = "Units: $uCount/${viewModel.config.unitsPerSide} | Cmdrs: $cCount/${viewModel.config.commandersPerSide}",
+                                    text = "Funds: $remainingFunds | Units: $uCount/${viewModel.config.unitsPerSide} | Cmdrs: $cCount/${viewModel.config.commandersPerSide}",
                                     color = Color.White,
                                     fontSize = 12.sp
                                 )
@@ -330,14 +365,18 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
 
                         LazyRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
                             contentPadding = PaddingValues(bottom = 8.dp, start = 8.dp, end = 8.dp)
                         ) {
                             items(deployableRoster) { (unitClass, subtype) ->
+                                val stats = getBaseStatsForUnit(unitClass, subtype)
+                                val canAfford = remainingFunds >= stats.cost
+
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
-                                        .clickable {
+                                        .alpha(if (canAfford) 1f else 0.4f)
+                                        .clickable(enabled = canAfford) {
                                             pendingDeployment = Pair(unitClass, subtype)
                                             showDeploymentPanel = false
                                         }
@@ -361,7 +400,12 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                                         else -> subtype.name
                                     }
 
-                                    Text(text = displayName, color = Color.White, fontSize = 10.sp)
+                                    Text(text = displayName, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "🪙 ${stats.cost}",
+                                        color = if (canAfford) BrightYellow else Color.Red,
+                                        fontSize = 10.sp
+                                    )
                                 }
                             }
                         }
@@ -437,6 +481,7 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
 
                                 pendingDeployment = null
                                 proxyPosition = null
+                                showDeploymentPanel = true // Re-open panel automatically to speed up deployment
                             } else {
                                 down.consume()
                             }
@@ -453,7 +498,10 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                 ) {
                     Text("Tap green zone to place, drag to rotate", color = Color.White, modifier = Modifier.padding(end = 16.dp))
                     Button(
-                        onClick = { pendingDeployment = null },
+                        onClick = {
+                            pendingDeployment = null
+                            showDeploymentPanel = true
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
                     ) {
                         Text("Cancel", color = Color.White)

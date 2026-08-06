@@ -22,15 +22,22 @@ data class GameUnit(
     val faction: Faction,
     val unitClass: UnitClass,
     val subtype: UnitSubtype,
-    var hp: Int,
-    val maxHp: Int,
-    var morale: Float,
-    var ammo: Int,
-    val speed: Float,
-    val attackRange: Float,
-    val attackPower: Int,
     var x: Float,
     var y: Float,
     var rotation: Float = 0f,
-    val commanderName: String? = null // New field for generated names
-)
+    val commanderName: String? = null
+) {
+    // 1. Fetch the locked v1 stats for this specific unit type
+    val baseStats: BaseUnitStats = getBaseStatsForUnit(unitClass, subtype)
+
+    // 2. Mutable state variables initialized from base stats
+    var currentHp: Int = baseStats.maxHp
+    var currentMorale: Int? = baseStats.maxMorale
+    var currentAmmo: Int? = baseStats.maxAmmo
+
+    // 3. Combat tracking timers and state
+    var reloadTimer: Float = 0f
+    var meleeTickTimer: Float = 0f
+    var isFirstChargeTick: Boolean = true
+    var isMoving: Boolean = false
+}

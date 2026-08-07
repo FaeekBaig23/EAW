@@ -34,12 +34,16 @@ fun SandboxMapCanvas(units: List<GameUnit>, modifier: Modifier = Modifier) {
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        drawRect(color = Color(0xFF556B2F))
+        drawRect(color = Color(0xFF556B2F)) // Base terrain color
 
         for (unit in units) {
             withTransform({
                 translate(left = unit.x, top = unit.y)
-                rotate(degrees = unit.rotation)
+
+                // Prevent commanders from rotating, and set pivot to the unit's center
+                if (unit.unitClass != UnitClass.COMMANDER) {
+                    rotate(degrees = unit.rotation, pivot = Offset.Zero)
+                }
             }) {
                 drawTacticalSprite(
                     unitClass = unit.unitClass,

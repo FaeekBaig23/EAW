@@ -12,6 +12,7 @@ import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitFactory
 import com.faiqbaig.eaw.core.UnitSubtype
 import com.faiqbaig.eaw.core.getBaseStatsForUnit
+import com.faiqbaig.eaw.core.getCorpCapacity
 
 enum class GamePhase { SETUP, DEPLOYMENT, BATTLE, POST_BATTLE }
 
@@ -127,14 +128,14 @@ class SandboxViewModel : ViewModel() {
 
     // --- Staged Deployment Logic ---
     fun stageUnitPlacement(faction: Faction, unitClass: UnitClass, subtype: UnitSubtype, x: Float, y: Float): Boolean {
-        // 1. Prevent Overlap (Requires at least 60 pixels of space between unit centers)
-        val minOverlapSquared = 3600f // 60px * 60px
+        // 1. Prevent Overlap
+        val minOverlapSquared = 3600f
         val hasOverlap = units.any {
             val dx = it.x - x
             val dy = it.y - y
             (dx * dx + dy * dy) < minOverlapSquared
         }
-        if (hasOverlap) return false // Blocks placement if too close to an existing unit
+        if (hasOverlap) return false
 
         // 2. Enforce Numeric Limits
         if (unitClass == UnitClass.COMMANDER) {
@@ -143,7 +144,18 @@ class SandboxViewModel : ViewModel() {
             if (getDeployedUnitCount(faction) >= config.unitsPerSide) return false
         }
 
-        // 3. Enforce Budget Limits
+        // 3. Enforce Corp Capacity Limit
+        if (unitClass != UnitClass.COMMANDER && activeCommanderId != null) {
+            val activeCmdr = units.find { it.id == activeCommanderId }
+            if (activeCmdr != null) {
+                val currentCorpSize = units.count { it.corpId == activeCommanderId }
+                if (currentCorpSize >= activeCmdr.subtype.getCorpCapacity()) {
+                    return false // Block placement if the selected Corp is full
+                }
+            }
+        }
+
+        // 4. Enforce Budget Limits
         val stats = getBaseStatsForUnit(unitClass, subtype)
         val currentFunds = if (faction == player1Faction) getPlayer1RemainingFunds() else getPlayer2RemainingFunds()
         if (currentFunds < stats.cost) return false

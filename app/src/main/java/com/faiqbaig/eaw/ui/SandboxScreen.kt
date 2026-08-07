@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import com.faiqbaig.eaw.core.getCorpCapacity
 
 @Composable
 fun SandboxScreen(
@@ -417,11 +418,17 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                 ) {
                     items(availableCommanders) { cmdr ->
                         val isActive = viewModel.activeCommanderId == cmdr.id
+
+                        // Calculate current corp size for this commander
+                        val currentCorpSize = viewModel.units.count { it.corpId == cmdr.id }
+                        val maxCapacity = cmdr.subtype.getCorpCapacity()
+                        val isFull = currentCorpSize >= maxCapacity
+
                         Box(
                             modifier = Modifier
                                 .border(
                                     width = if (isActive) 2.dp else 1.dp,
-                                    color = if (isActive) BrightYellow else Color.Gray,
+                                    color = if (isActive) BrightYellow else if (isFull) Color.Red else Color.Gray,
                                     shape = RoundedCornerShape(4.dp)
                                 )
                                 .background(if (isActive) Color(0xFF2C3E50) else Color.Transparent)
@@ -429,8 +436,8 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "Corp: ${cmdr.commanderName ?: "General"}",
-                                color = if (isActive) BrightYellow else Color.White,
+                                text = "${cmdr.commanderName ?: "General"} ${cmdr.subtype.toRomanNumeral()}: $currentCorpSize/$maxCapacity",
+                                color = if (isActive) BrightYellow else if (isFull) Color.Red else Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
                             )

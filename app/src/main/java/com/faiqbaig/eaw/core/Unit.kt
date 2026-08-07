@@ -27,7 +27,16 @@ fun UnitSubtype.toRomanNumeral(): String {
         else -> ""
     }
 }
-
+fun UnitSubtype.getCorpCapacity(): Int {
+    return when (this) {
+        UnitSubtype.LEVEL_1 -> 4
+        UnitSubtype.LEVEL_2 -> 5
+        UnitSubtype.LEVEL_3 -> 6
+        UnitSubtype.LEVEL_4 -> 7
+        UnitSubtype.LEVEL_5 -> 8
+        else -> 0 // Non-commanders don't have capacity
+    }
+}
 data class GameUnit(
     val id: String = UUID.randomUUID().toString(),
     val faction: Faction,

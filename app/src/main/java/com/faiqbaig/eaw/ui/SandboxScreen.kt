@@ -51,12 +51,44 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import com.faiqbaig.eaw.core.getCorpCapacity
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import com.faiqbaig.eaw.audio.MusicPlayerManager
 
 @Composable
 fun SandboxScreen(
     viewModel: SandboxViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     onExitToMenu: () -> Unit
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Manage music lifecycle
+    DisposableEffect(lifecycleOwner) {
+        // Start the shuffled playlist when the screen is active
+        MusicPlayerManager.startMusic(context)
+
+        // Pause music if the user minimizes the app
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                MusicPlayerManager.pauseMusic()
+            } else if (event == Lifecycle.Event.ON_RESUME) {
+                MusicPlayerManager.resumeMusic()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        // Clean up and stop music when exiting Sandbox Mode
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            MusicPlayerManager.stopMusic()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
 
         // FOG OF WAR LOGIC: Hide enemy units during deployment

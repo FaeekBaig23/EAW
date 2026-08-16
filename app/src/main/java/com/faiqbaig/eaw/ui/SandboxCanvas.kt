@@ -19,6 +19,7 @@ import com.faiqbaig.eaw.core.Faction
 import com.faiqbaig.eaw.core.GameUnit
 import com.faiqbaig.eaw.core.UnitClass
 import com.faiqbaig.eaw.core.UnitSubtype
+import com.faiqbaig.eaw.core.UnitState
 import androidx.compose.ui.graphics.nativeCanvas
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -28,6 +29,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 fun SandboxMapCanvas(
     units: List<GameUnit>,
     selectedUnitId: String?,
+    frame: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val flagBitmaps = mapOf(
@@ -42,19 +44,31 @@ fun SandboxMapCanvas(
         drawRect(color = Color(0xFF556B2F)) // Base terrain color
 
         for (unit in units) {
+            // 1. ROTATED SPRITE LAYER (Unit sprite, faction ring, attack flash)
             withTransform({
                 translate(left = unit.x, top = unit.y)
 
-                // Prevent commanders from rotating, and set pivot to the unit's center
                 if (unit.unitClass != UnitClass.COMMANDER) {
                     rotate(degrees = unit.rotation, pivot = Offset.Zero)
                 }
             }) {
-                // Highlight selected unit
+                // Selection ring in faction color
                 if (unit.id == selectedUnitId) {
                     drawCircle(
-                        color = Color.White.copy(alpha = 0.5f),
-                        radius = 45f // Slightly larger than the unit sprite
+                        color = unit.faction.color.copy(alpha = 0.5f),
+                        radius = 50f,
+                        center = Offset.Zero
+                    )
+                }
+
+                // Brief white flash during attack actions
+                val isAttacking = unit.state == UnitState.FIRING || unit.state == UnitState.IN_MELEE
+                if (isAttacking) {
+                    val flashAlpha = if (frame % 30 < 15) 0.4f else 0.1f
+                    drawCircle(
+                        color = Color.White.copy(alpha = flashAlpha),
+                        radius = 45f,
+                        center = Offset.Zero
                     )
                 }
 
@@ -65,6 +79,53 @@ fun SandboxMapCanvas(
                     flagBitmap = flagBitmaps[unit.faction],
                     commanderName = unit.commanderName
                 )
+            }
+
+            // 2. UNROTATED HUD LAYER (HP & Morale status bars)
+            if (unit.id == selectedUnitId) {
+                withTransform({
+                    translate(left = unit.x, top = unit.y)
+                }) {
+                    val barWidth = 60f
+                    val barHeight = 6f
+                    val yOffset = -60f // Offset above the unit sprite
+
+                    // Fetch max HP from baseStats
+                    val maxUnitHp = unit.baseStats.maxHp.toFloat()
+                    val hpRatio = (unit.currentHp / maxUnitHp).coerceIn(0f, 1f)
+
+                    // HP Bar (Top - Green)
+                    drawRect(
+                        color = Color.Black,
+                        topLeft = Offset(-barWidth / 2, yOffset),
+                        size = Size(barWidth, barHeight)
+                    )
+                    drawRect(
+                        color = Color.Green,
+                        topLeft = Offset(-barWidth / 2, yOffset),
+                        size = Size(barWidth * hpRatio, barHeight)
+                    )
+
+                    // Only draw the Morale bar if the unit actually utilizes morale
+                    if (unit.baseStats.maxMorale != null) {
+                        // Safely unwrap nullable morale values, defaulting to 1f to avoid division by zero
+                        val maxUnitMorale = unit.baseStats.maxMorale.toFloat()
+                        val safeCurrentMorale = unit.currentMorale ?: 0f
+                        val moraleRatio = (safeCurrentMorale / maxUnitMorale).coerceIn(0f, 1f)
+
+                        // Morale Bar (Bottom - Blue)
+                        drawRect(
+                            color = Color.Black,
+                            topLeft = Offset(-barWidth / 2, yOffset + barHeight + 2f),
+                            size = Size(barWidth, barHeight)
+                        )
+                        drawRect(
+                            color = Color.Blue,
+                            topLeft = Offset(-barWidth / 2, yOffset + barHeight + 2f),
+                            size = Size(barWidth * moraleRatio, barHeight)
+                        )
+                    }
+                }
             }
         }
     }

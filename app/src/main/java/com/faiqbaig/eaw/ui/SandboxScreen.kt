@@ -96,8 +96,7 @@ fun SandboxScreen(
 
     // --- NEW: THE GAME LOOP ---
     // Runs the BattleEngine math every frame during the Battle Phase
-    LaunchedEffect(viewModel.currentPhase) {
-        // Replace GamePhase.BATTLE with your actual enum reference if it differs
+    LaunchedEffect(viewModel.currentPhase.name) {
         if (viewModel.currentPhase.name == "BATTLE") {
             var lastFrameTime = System.nanoTime()
             while (true) {
@@ -107,6 +106,9 @@ fun SandboxScreen(
 
                     // Run the simulation tick
                     BattleEngine.updateTick(viewModel.units, deltaTime)
+
+                    // Trigger the UI to redraw!
+                    viewModel.battleFrame++
                 }
             }
         }
@@ -131,6 +133,7 @@ fun SandboxScreen(
         SandboxMapCanvas(
             units = visibleUnits,
             selectedUnitId = viewModel.selectedBattleUnitId,
+            frame = viewModel.battleFrame,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -657,8 +660,6 @@ fun BattlePhaseOverlay(viewModel: SandboxViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // --- NEW: TOUCH INPUT HANDLING ---
-            // This captures screen taps and passes the X/Y coordinates to the ViewModel
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
                     viewModel.handleBattleMapTap(offset.x, offset.y)

@@ -32,6 +32,7 @@ class SandboxViewModel : ViewModel() {
 
     // Core States
     var currentPhase by mutableStateOf(GamePhase.SETUP)
+    var battleFrame by mutableIntStateOf(0)
     var selectedBattleUnitId by mutableStateOf<String?>(null)
         private set
     var config by mutableStateOf(GameConfig())
@@ -218,30 +219,36 @@ class SandboxViewModel : ViewModel() {
 
     fun getP1CurrentHp() = units.filter { it.faction == player1Faction }.sumOf { it.currentHp }
     fun getP2CurrentHp() = units.filter { it.faction == player2Faction }.sumOf { it.currentHp }
+
     fun handleBattleMapTap(x: Float, y: Float) {
-        // 1. Check if the player tapped on a unit (using a 50px radius for finger tapping)
-        val tappedUnit = units.find { sqrt((it.x - x).pow(2) + (it.y - y).pow(2)) < 50f }
+        val tappedUnit = units.find { unit ->
+            val dx = unit.x - x
+            val dy = unit.y - y
+            kotlin.math.sqrt(dx * dx + dy * dy) < 150f
+        }
 
         val currentlySelectedUnit = units.find { it.id == selectedBattleUnitId }
 
         if (tappedUnit != null) {
-            if (currentlySelectedUnit == null || tappedUnit.faction == currentlySelectedUnit.faction) {
-                // Select friendly unit
+            if (tappedUnit.id == selectedBattleUnitId) {
+                // --- NEW: Tapping the active unit deselects it ---
+                selectedBattleUnitId = null
+            } else if (currentlySelectedUnit == null || tappedUnit.faction == currentlySelectedUnit.faction) {
+                // Select a new friendly unit
                 selectedBattleUnitId = tappedUnit.id
             } else {
-                // We have a friendly unit selected, and we tapped an enemy -> Fixate/Chase
+                // Chase/Attack enemy unit
                 currentlySelectedUnit.targetUnitId = tappedUnit.id
                 currentlySelectedUnit.state = UnitState.CHASING
             }
         } else {
             if (currentlySelectedUnit != null) {
-                // Tapped empty space with a unit selected -> Move Order
-                currentlySelectedUnit.targetUnitId = null // Cancel any current targeting
+                // Move Order
+                currentlySelectedUnit.targetUnitId = null
                 currentlySelectedUnit.destinationX = x
                 currentlySelectedUnit.destinationY = y
                 currentlySelectedUnit.state = UnitState.MOVING
             } else {
-                // Tapped empty space with nothing selected -> clear selection
                 selectedBattleUnitId = null
             }
         }

@@ -134,6 +134,7 @@ fun SandboxScreen(
             units = visibleUnits,
             selectedUnitId = viewModel.selectedBattleUnitId,
             frame = viewModel.battleFrame,
+            showStatusBars = viewModel.showStatusBars,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -671,21 +672,23 @@ fun BattlePhaseOverlay(viewModel: SandboxViewModel) {
                 .align(Alignment.TopCenter)
                 .padding(16.dp)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             Button(
-                onClick = { viewModel.endBattle("${viewModel.player2Faction.name.replace("_", " ")} Wins by Surrender!") },
+                onClick = { viewModel.endBattle("P1 Surrender") },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
-            ) {
-                Text("P1 Surrender", color = Color.White)
-            }
+            ) { Text("P1 Surrender", color = Color.White) }
+
+            // --- NEW: Toggle Status Bars Button ---
+            Button(
+                onClick = { viewModel.toggleStatusBars() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray.copy(alpha = 0.8f))
+            ) { Text("Toggle Bars", color = Color.White) }
 
             Button(
-                onClick = { viewModel.endBattle("${viewModel.player1Faction.name.replace("_", " ")} Wins by Surrender!") },
+                onClick = { viewModel.endBattle("P2 Surrender") },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
-            ) {
-                Text("P2 Surrender", color = Color.White)
-            }
+            ) { Text("P2 Surrender", color = Color.White) }
         }
     }
 }

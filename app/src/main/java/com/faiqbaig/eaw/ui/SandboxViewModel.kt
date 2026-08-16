@@ -39,6 +39,8 @@ class SandboxViewModel : ViewModel() {
         private set
     var activeDeploymentPlayer by mutableIntStateOf(1)
         private set
+    // Add this with your other State variables
+    var showStatusBars by mutableStateOf(false)
 
     var player1Faction by mutableStateOf(Faction.FRANCE)
         private set
@@ -71,6 +73,10 @@ class SandboxViewModel : ViewModel() {
     fun startSetup() {
         units.clear()
         currentPhase = GamePhase.SETUP
+    }
+
+    fun toggleStatusBars() {
+        showStatusBars = !showStatusBars
     }
 
     fun startDeployment() {

@@ -63,8 +63,9 @@ object BattleEngine {
         unit.y += dy * ratio
         unit.isMoving = true
 
-        // Update rotation to face movement direction
-        unit.rotation = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+        // --- TWEAKED: Offset by +90f or +180f so the north (white) edge faces the direction of travel ---
+        val angleInDegrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+        unit.rotation = angleInDegrees + 90f // Adjust to 0f or 180f if your sprite asset alignment requires it
     }
 
     private fun processRotation(unit: GameUnit, allUnits: List<GameUnit>, deltaTime: Float) {
@@ -76,7 +77,10 @@ object BattleEngine {
 
         val dx = target.x - unit.x
         val dy = target.y - unit.y
-        val targetAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+
+        // --- TWEAKED: Align target angle calculation with the north sprite edge ---
+        val rawAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+        val targetAngle = rawAngle + 90f // Matches the movement offset adjustment
 
         // Simple rotation interpolation
         val angleDiff = normalizeAngle(targetAngle - unit.rotation)

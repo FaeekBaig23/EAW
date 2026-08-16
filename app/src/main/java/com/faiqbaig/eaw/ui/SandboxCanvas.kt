@@ -30,6 +30,7 @@ fun SandboxMapCanvas(
     units: List<GameUnit>,
     selectedUnitId: String?,
     frame: Int = 0,
+    showStatusBars: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val flagBitmaps = mapOf(
@@ -41,13 +42,34 @@ fun SandboxMapCanvas(
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        drawRect(color = Color(0xFF556B2F)) // Base terrain color
+        drawRect(color = Color(0xFF556B2F))
 
         for (unit in units) {
-            // 1. ROTATED SPRITE LAYER (Unit sprite, faction ring, attack flash)
+
+            // --- NEW: DRAW MOVEMENT ARROW (Drawn before the unit so it stays underneath) ---
+            if (unit.state == UnitState.MOVING && unit.destinationX != null && unit.destinationY != null) {
+                val destX = unit.destinationX!!
+                val destY = unit.destinationY!!
+
+                // Draw line from unit to destination
+                drawLine(
+                    color = Color.White.copy(alpha = 0.6f),
+                    start = Offset(unit.x, unit.y),
+                    end = Offset(destX, destY),
+                    strokeWidth = 4f
+                )
+
+                // Draw a small destination marker (arrow head substitute)
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.8f),
+                    radius = 8f,
+                    center = Offset(destX, destY)
+                )
+            }
+
+            // 1. ROTATED SPRITE LAYER
             withTransform({
                 translate(left = unit.x, top = unit.y)
-
                 if (unit.unitClass != UnitClass.COMMANDER) {
                     rotate(degrees = unit.rotation, pivot = Offset.Zero)
                 }
@@ -61,17 +83,7 @@ fun SandboxMapCanvas(
                     )
                 }
 
-                // Brief white flash during attack actions
-                val isAttacking = unit.state == UnitState.FIRING || unit.state == UnitState.IN_MELEE
-                if (isAttacking) {
-                    val flashAlpha = if (frame % 30 < 15) 0.4f else 0.1f
-                    drawCircle(
-                        color = Color.White.copy(alpha = flashAlpha),
-                        radius = 45f,
-                        center = Offset.Zero
-                    )
-                }
-
+                // Draw standard tactical sprite
                 drawTacticalSprite(
                     unitClass = unit.unitClass,
                     subtype = unit.subtype,
@@ -79,18 +91,33 @@ fun SandboxMapCanvas(
                     flagBitmap = flagBitmaps[unit.faction],
                     commanderName = unit.commanderName
                 )
+
+                // --- NEW: SPRITE FLASH (Instead of circle) ---
+                val isAttacking = unit.state == UnitState.FIRING || unit.state == UnitState.IN_MELEE
+                if (isAttacking) {
+                    val flashAlpha = if (frame % 30 < 15) 0.5f else 0.0f
+                    if (flashAlpha > 0f) {
+                        // Draws a white rectangle precisely over the sprite.
+                        // Adjust the 60f width/height to match your exact sprite dimensions.
+                        val spriteSize = 60f
+                        drawRect(
+                            color = Color.White.copy(alpha = flashAlpha),
+                            topLeft = Offset(-spriteSize / 2, -spriteSize / 2),
+                            size = Size(spriteSize, spriteSize)
+                        )
+                    }
+                }
             }
 
-            // 2. UNROTATED HUD LAYER (HP & Morale status bars)
-            if (unit.id == selectedUnitId) {
+            // --- NEW: UNROTATED HUD LAYER (Toggled Globally + Light Blue) ---
+            if (showStatusBars) {
                 withTransform({
                     translate(left = unit.x, top = unit.y)
                 }) {
                     val barWidth = 60f
                     val barHeight = 6f
-                    val yOffset = -60f // Offset above the unit sprite
+                    val yOffset = -50f // Pushed down slightly since the selection ring is gone
 
-                    // Fetch max HP from baseStats
                     val maxUnitHp = unit.baseStats.maxHp.toFloat()
                     val hpRatio = (unit.currentHp / maxUnitHp).coerceIn(0f, 1f)
 
@@ -106,21 +133,19 @@ fun SandboxMapCanvas(
                         size = Size(barWidth * hpRatio, barHeight)
                     )
 
-                    // Only draw the Morale bar if the unit actually utilizes morale
                     if (unit.baseStats.maxMorale != null) {
-                        // Safely unwrap nullable morale values, defaulting to 1f to avoid division by zero
                         val maxUnitMorale = unit.baseStats.maxMorale.toFloat()
                         val safeCurrentMorale = unit.currentMorale ?: 0f
                         val moraleRatio = (safeCurrentMorale / maxUnitMorale).coerceIn(0f, 1f)
 
-                        // Morale Bar (Bottom - Blue)
+                        // Morale Bar (Bottom - Light Blue)
                         drawRect(
                             color = Color.Black,
                             topLeft = Offset(-barWidth / 2, yOffset + barHeight + 2f),
                             size = Size(barWidth, barHeight)
                         )
                         drawRect(
-                            color = Color.Blue,
+                            color = Color(0xFFADD8E6), // Light Blue Hex Code
                             topLeft = Offset(-barWidth / 2, yOffset + barHeight + 2f),
                             size = Size(barWidth * moraleRatio, barHeight)
                         )

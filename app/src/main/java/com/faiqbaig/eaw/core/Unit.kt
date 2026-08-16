@@ -27,6 +27,7 @@ fun UnitSubtype.toRomanNumeral(): String {
         else -> ""
     }
 }
+
 fun UnitSubtype.getCorpCapacity(): Int {
     return when (this) {
         UnitSubtype.LEVEL_1 -> 4
@@ -37,6 +38,7 @@ fun UnitSubtype.getCorpCapacity(): Int {
         else -> 0 // Non-commanders don't have capacity
     }
 }
+
 data class GameUnit(
     val id: String = UUID.randomUUID().toString(),
     val faction: Faction,
@@ -50,12 +52,40 @@ data class GameUnit(
 ) {
     val baseStats: BaseUnitStats = getBaseStatsForUnit(unitClass, subtype)
 
+    // Original variables
     var currentHp: Int = baseStats.maxHp
-    var currentMorale: Int? = baseStats.maxMorale
+    // Converted to Float to handle tick-based decimal decay cleanly
+    var currentMorale: Float? = baseStats.maxMorale?.toFloat()
     var currentAmmo: Int? = baseStats.maxAmmo
 
     var reloadTimer: Float = 0f
     var meleeTickTimer: Float = 0f
     var isFirstChargeTick: Boolean = true
-    var isMoving: Boolean = false
+    var isMoving: Boolean = false // Kept for legacy UI support
+
+    // --- New State Machine & Combat Logic Variables ---
+    var state: UnitState = UnitState.IDLE
+    var targetUnitId: String? = null
+    var destinationX: Float? = null
+    var destinationY: Float? = null
+
+    var timeSinceLastCombat: Float = 0f
+    var chaseOutrunTimer: Float = 0f
+
+    var isEncircled: Boolean = false
+    var isSupplyCut: Boolean = false
+    var isInCommanderAura: Boolean = true
+    var hasFleePath: Boolean = true
+
+    // Helpers for engine logic
+    val isMelee: Boolean get() = unitClass == UnitClass.CAVALRY
+    val isCavalry: Boolean get() = unitClass == UnitClass.CAVALRY
+
+    fun clearCurrentOrders() {
+        targetUnitId = null
+        destinationX = null
+        destinationY = null
+        state = UnitState.IDLE
+        isMoving = false
+    }
 }

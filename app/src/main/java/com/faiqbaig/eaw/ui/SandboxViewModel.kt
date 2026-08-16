@@ -200,7 +200,7 @@ class SandboxViewModel : ViewModel() {
         val unit = pendingPlacementUnit ?: return
 
         if (config.infiniteAmmo && unit.currentAmmo != null) unit.currentAmmo = 9999
-        if (config.infiniteMorale && unit.currentMorale != null) unit.currentMorale = 9999
+        if (config.infiniteMorale && unit.currentMorale != null) unit.currentMorale = 9999f
 
         units.add(unit)
 

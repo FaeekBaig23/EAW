@@ -4,6 +4,7 @@ package com.faiqbaig.eaw.core
  * Holds the static base attributes for a unit class/subtype.
  */
 data class BaseUnitStats(
+    // Original properties (Order must match the factory calls)
     val maxHp: Int,
     val maxMorale: Int?,
     val maxAmmo: Int?,
@@ -11,9 +12,20 @@ data class BaseUnitStats(
     val reloadTime: Float?,
     val volleyDamage: Int,
     val meleeDamage: Int,
-    val chargeBonus: Float = 0f,
+    val chargeBonus: Float? = null,
     val pointBlankVolleyDamage: Int? = null,
-    val cost: Int // Deployment/training cost in funds
+    val cost: Int,
+
+    // New Combat & Morale Simulation Modifiers (Assigned defaults so the factory doesn't break)
+    val rotationSpeed: Float = 60f, // degrees per second
+    val detectionRadius: Float = 400f,
+    val effectiveRange: Float = 250f,
+    val canisterRange: Float = 100f,
+    val moraleDecayPerHitPct: Float = 0.05f, // 5% morale lost per hit
+    val moraleDecayPerSecMoving: Float = 1.0f,
+    val moraleRegenPerSecIdle: Float = 2.0f,
+    val supplyCutMoraleDrainPerSec: Float = 1.0f,
+    val moveSpeedMultiplier: Float = 1.0f
 )
 
 /**

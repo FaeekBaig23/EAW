@@ -13,6 +13,9 @@ import com.faiqbaig.eaw.core.UnitFactory
 import com.faiqbaig.eaw.core.UnitSubtype
 import com.faiqbaig.eaw.core.getBaseStatsForUnit
 import com.faiqbaig.eaw.core.getCorpCapacity
+import com.faiqbaig.eaw.core.UnitState
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 enum class GamePhase { SETUP, DEPLOYMENT, BATTLE, POST_BATTLE }
 
@@ -29,6 +32,7 @@ class SandboxViewModel : ViewModel() {
 
     // Core States
     var currentPhase by mutableStateOf(GamePhase.SETUP)
+    var selectedBattleUnitId by mutableStateOf<String?>(null)
         private set
     var config by mutableStateOf(GameConfig())
         private set
@@ -214,4 +218,32 @@ class SandboxViewModel : ViewModel() {
 
     fun getP1CurrentHp() = units.filter { it.faction == player1Faction }.sumOf { it.currentHp }
     fun getP2CurrentHp() = units.filter { it.faction == player2Faction }.sumOf { it.currentHp }
+    fun handleBattleMapTap(x: Float, y: Float) {
+        // 1. Check if the player tapped on a unit (using a 50px radius for finger tapping)
+        val tappedUnit = units.find { sqrt((it.x - x).pow(2) + (it.y - y).pow(2)) < 50f }
+
+        val currentlySelectedUnit = units.find { it.id == selectedBattleUnitId }
+
+        if (tappedUnit != null) {
+            if (currentlySelectedUnit == null || tappedUnit.faction == currentlySelectedUnit.faction) {
+                // Select friendly unit
+                selectedBattleUnitId = tappedUnit.id
+            } else {
+                // We have a friendly unit selected, and we tapped an enemy -> Fixate/Chase
+                currentlySelectedUnit.targetUnitId = tappedUnit.id
+                currentlySelectedUnit.state = UnitState.CHASING
+            }
+        } else {
+            if (currentlySelectedUnit != null) {
+                // Tapped empty space with a unit selected -> Move Order
+                currentlySelectedUnit.targetUnitId = null // Cancel any current targeting
+                currentlySelectedUnit.destinationX = x
+                currentlySelectedUnit.destinationY = y
+                currentlySelectedUnit.state = UnitState.MOVING
+            } else {
+                // Tapped empty space with nothing selected -> clear selection
+                selectedBattleUnitId = null
+            }
+        }
+    }
 }

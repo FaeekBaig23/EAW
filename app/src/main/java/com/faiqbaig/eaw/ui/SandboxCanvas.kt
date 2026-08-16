@@ -22,9 +22,14 @@ import com.faiqbaig.eaw.core.UnitSubtype
 import androidx.compose.ui.graphics.nativeCanvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
-fun SandboxMapCanvas(units: List<GameUnit>, modifier: Modifier = Modifier) {
+fun SandboxMapCanvas(
+    units: List<GameUnit>,
+    selectedUnitId: String?,
+    modifier: Modifier = Modifier
+) {
     val flagBitmaps = mapOf(
         Faction.FRANCE to ImageBitmap.imageResource(id = Faction.FRANCE.flagResId),
         Faction.GREAT_BRITAIN to ImageBitmap.imageResource(id = Faction.GREAT_BRITAIN.flagResId),
@@ -45,6 +50,14 @@ fun SandboxMapCanvas(units: List<GameUnit>, modifier: Modifier = Modifier) {
                     rotate(degrees = unit.rotation, pivot = Offset.Zero)
                 }
             }) {
+                // Highlight selected unit
+                if (unit.id == selectedUnitId) {
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.5f),
+                        radius = 45f // Slightly larger than the unit sprite
+                    )
+                }
+
                 drawTacticalSprite(
                     unitClass = unit.unitClass,
                     subtype = unit.subtype,

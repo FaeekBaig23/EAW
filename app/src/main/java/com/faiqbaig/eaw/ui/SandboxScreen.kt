@@ -58,6 +58,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.faiqbaig.eaw.audio.MusicPlayerManager
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
+import com.faiqbaig.eaw.combat.BattleEngine
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 @Composable
 fun SandboxScreen(
@@ -89,11 +94,29 @@ fun SandboxScreen(
         }
     }
 
+    // --- NEW: THE GAME LOOP ---
+    // Runs the BattleEngine math every frame during the Battle Phase
+    LaunchedEffect(viewModel.currentPhase) {
+        // Replace GamePhase.BATTLE with your actual enum reference if it differs
+        if (viewModel.currentPhase.name == "BATTLE") {
+            var lastFrameTime = System.nanoTime()
+            while (true) {
+                withFrameNanos { frameTime ->
+                    val deltaTime = (frameTime - lastFrameTime) / 1_000_000_000f
+                    lastFrameTime = frameTime
+
+                    // Run the simulation tick
+                    BattleEngine.updateTick(viewModel.units, deltaTime)
+                }
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
 
         // FOG OF WAR LOGIC: Hide enemy units during deployment
-        val visibleUnits = when (viewModel.currentPhase) {
-            GamePhase.DEPLOYMENT -> {
+        val visibleUnits = when (viewModel.currentPhase.name) {
+            "DEPLOYMENT" -> {
                 if (viewModel.activeDeploymentPlayer == 1) {
                     viewModel.units.filter { it.faction == viewModel.player1Faction }
                 } else {
@@ -104,23 +127,25 @@ fun SandboxScreen(
         }
 
         // 1. Map Layer
+        // Note: If you added the highlight logic, ensure you pass the selected ID here
         SandboxMapCanvas(
             units = visibleUnits,
+            selectedUnitId = viewModel.selectedBattleUnitId,
             modifier = Modifier.fillMaxSize()
         )
 
         // 2. Overlay Layer
-        when (viewModel.currentPhase) {
-            GamePhase.SETUP -> {
+        when (viewModel.currentPhase.name) {
+            "SETUP" -> {
                 SetupPhaseOverlay(viewModel, onExitToMenu)
             }
-            GamePhase.DEPLOYMENT -> {
+            "DEPLOYMENT" -> {
                 DeploymentPhaseOverlay(viewModel)
             }
-            GamePhase.BATTLE -> {
+            "BATTLE" -> {
                 BattlePhaseOverlay(viewModel)
             }
-            GamePhase.POST_BATTLE -> {
+            "POST_BATTLE" -> {
                 PostBattleOverlay(viewModel, onExitToMenu)
             }
         }
@@ -629,7 +654,17 @@ fun DeploymentPhaseOverlay(viewModel: SandboxViewModel) {
 
 @Composable
 fun BattlePhaseOverlay(viewModel: SandboxViewModel) {
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // --- NEW: TOUCH INPUT HANDLING ---
+            // This captures screen taps and passes the X/Y coordinates to the ViewModel
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    viewModel.handleBattleMapTap(offset.x, offset.y)
+                }
+            }
+    ) {
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)

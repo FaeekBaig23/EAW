@@ -42,6 +42,9 @@ fun SandboxMapCanvas(
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
+        // FORCE REDRAW: Reading 'frame' inside the Canvas scope ensures Compose
+        // invalidates and redraws the canvas on every engine tick.
+        @Suppress("UNUSED_VARIABLE") val unusedFrame = frame
         drawRect(color = Color(0xFF556B2F))
 
         for (unit in units) {
@@ -92,20 +95,17 @@ fun SandboxMapCanvas(
                     commanderName = unit.commanderName
                 )
 
-                // --- NEW: SPRITE FLASH (Instead of circle) ---
-                val isAttacking = unit.state == UnitState.FIRING || unit.state == UnitState.IN_MELEE
-                if (isAttacking) {
-                    val flashAlpha = if (frame % 30 < 15) 0.5f else 0.0f
-                    if (flashAlpha > 0f) {
-                        // Draws a white rectangle precisely over the sprite.
-                        // Adjust the 60f width/height to match your exact sprite dimensions.
-                        val spriteSize = 60f
-                        drawRect(
-                            color = Color.White.copy(alpha = flashAlpha),
-                            topLeft = Offset(-spriteSize / 2, -spriteSize / 2),
-                            size = Size(spriteSize, spriteSize)
-                        )
-                    }
+                // --- SPRITE FLASH (Triggers briefly on volley/melee strike) ---
+                val isAttackingFlash =
+                    (System.currentTimeMillis() - unit.lastAttackTimestamp) < 120L
+
+                if (isAttackingFlash) {
+                    val spriteSize = 60f
+                    drawRect(
+                        color = Color.White.copy(alpha = 0.85f),
+                        topLeft = Offset(-spriteSize / 2f, -spriteSize / 2f),
+                        size = Size(spriteSize, spriteSize)
+                    )
                 }
             }
 

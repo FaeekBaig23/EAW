@@ -68,6 +68,7 @@ data class GameUnit(
     var targetUnitId: String? = null
     var destinationX: Float? = null
     var destinationY: Float? = null
+    var lastAttackTimestamp: Long = 0L
 
     var timeSinceLastCombat: Float = 0f
     var chaseOutrunTimer: Float = 0f

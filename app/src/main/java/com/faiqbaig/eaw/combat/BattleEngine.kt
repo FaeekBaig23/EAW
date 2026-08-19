@@ -9,9 +9,12 @@ import kotlin.random.Random
 
 object BattleEngine {
 
-    fun updateTick(units: List<GameUnit>, deltaTime: Float) {
+    fun updateTick(units: List<GameUnit>, rawDeltaTime: Float) {
+        // Clamp deltaTime to prevent teleportation during UI recomposition frame hitches
+        val deltaTime = rawDeltaTime.coerceAtMost(0.05f)
+
         units.forEach { unit ->
-            if (unit.currentHp <= 0) return@forEach // Dead units don't process
+            if (unit.currentHp <= 0) return@forEach
 
             var tookDamageThisTick = false
 
@@ -22,12 +25,47 @@ object BattleEngine {
                 UnitState.FIRING -> tookDamageThisTick = processFiring(unit, units, deltaTime)
                 UnitState.IN_MELEE -> tookDamageThisTick = processMelee(unit, units, deltaTime)
                 UnitState.CHASING -> processChasing(unit, units, deltaTime)
-                UnitState.RETURNING -> processMovement(unit, deltaTime) // Reuses movement logic
+                UnitState.RETURNING -> processMovement(unit, deltaTime)
                 UnitState.ROUTING -> processRouting(unit, deltaTime)
                 UnitState.SURRENDERING -> { /* Wait for capture logic */ }
             }
 
             updateMorale(unit, deltaTime, tookDamageThisTick)
+        }
+
+        resolveUnitCollisions(units)
+    }
+
+    // Call this inside BattleEngine.updateTick() after processing unit movement
+    private fun resolveUnitCollisions(units: List<GameUnit>, unitRadius: Float = 30f) {
+        val minDistance = unitRadius * 2f
+        val minDistanceSq = minDistance * minDistance
+
+        for (i in units.indices) {
+            for (j in i + 1 until units.size) {
+                val u1 = units[i]
+                val u2 = units[j]
+
+                // Ignore routing or dead units if necessary
+                if (u1.currentHp <= 0 || u2.currentHp <= 0) continue
+
+                val dx = u2.x - u1.x
+                val dy = u2.y - u1.y
+                val distSq = dx * dx + dy * dy
+
+                if (distSq in 0.0001f..minDistanceSq) {
+                    val dist = sqrt(distSq)
+                    val overlap = (minDistance - dist) / 2f
+                    val nx = dx / dist
+                    val ny = dy / dist
+
+                    // Push units apart along collision vector
+                    u1.x -= nx * overlap
+                    u1.y -= ny * overlap
+                    u2.x += nx * overlap
+                    u2.y += ny * overlap
+                }
+            }
         }
     }
 
@@ -51,21 +89,35 @@ object BattleEngine {
         if (distance < 5f) { // Arrived
             unit.x = destX
             unit.y = destY
-            unit.state = if (unit.state == UnitState.RETURNING) UnitState.IDLE else UnitState.IDLE
+            unit.state = UnitState.IDLE
             unit.clearCurrentOrders()
             return
         }
 
-        // Move unit
+        // 1. Calculate target facing angle
+        val rawAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+        val targetAngle = rawAngle + 90f
+
+        // 2. Smoothly rotate toward destination angle using rotationSpeed
+        val angleDiff = normalizeAngle(targetAngle - unit.rotation)
+        val step = unit.baseStats.rotationSpeed * deltaTime
+
+        if (abs(angleDiff) > 15f) {
+            // Pivot on the spot until within 15 degrees of target heading
+            unit.rotation += if (angleDiff > 0) min(step, angleDiff) else max(-step, angleDiff)
+            unit.isMoving = false
+            return
+        } else {
+            // Continue fine-tuning rotation while marching
+            unit.rotation += if (angleDiff > 0) min(step, angleDiff) else max(-step, angleDiff)
+        }
+
+        // 3. Move unit forward once aligned
         val speed = unit.baseStats.moveSpeed * unit.baseStats.moveSpeedMultiplier * deltaTime
         val ratio = speed / distance
         unit.x += dx * ratio
         unit.y += dy * ratio
         unit.isMoving = true
-
-        // --- TWEAKED: Offset by +90f or +180f so the north (white) edge faces the direction of travel ---
-        val angleInDegrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-        unit.rotation = angleInDegrees + 90f // Adjust to 0f or 180f if your sprite asset alignment requires it
     }
 
     private fun processRotation(unit: GameUnit, allUnits: List<GameUnit>, deltaTime: Float) {
@@ -115,6 +167,9 @@ object BattleEngine {
 
             val damage = calculateDamage(attacker, target, distance, false)
             target.currentHp -= damage
+
+            // Stamp timestamp when volley fires
+            attacker.lastAttackTimestamp = System.currentTimeMillis()
             return true // Damage was dealt
         }
         return false
@@ -134,6 +189,9 @@ object BattleEngine {
             val distance = getDistance(attacker, target)
             val damage = calculateDamage(attacker, target, distance, attacker.isFirstChargeTick)
             target.currentHp -= damage
+
+            // Stamp timestamp when melee strike connects
+            attacker.lastAttackTimestamp = System.currentTimeMillis()
 
             attacker.isFirstChargeTick = false
             return true

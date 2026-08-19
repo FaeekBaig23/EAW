@@ -227,17 +227,20 @@ class SandboxViewModel : ViewModel() {
     fun getP2CurrentHp() = units.filter { it.faction == player2Faction }.sumOf { it.currentHp }
 
     fun handleBattleMapTap(x: Float, y: Float) {
+        val tapRadius = 40f
+        val tapRadiusSquared = tapRadius * tapRadius
+
         val tappedUnit = units.find { unit ->
             val dx = unit.x - x
             val dy = unit.y - y
-            kotlin.math.sqrt(dx * dx + dy * dy) < 150f
+            (dx * dx + dy * dy) <= tapRadiusSquared
         }
 
         val currentlySelectedUnit = units.find { it.id == selectedBattleUnitId }
 
         if (tappedUnit != null) {
             if (tappedUnit.id == selectedBattleUnitId) {
-                // --- NEW: Tapping the active unit deselects it ---
+                // Tapping the active unit deselects it
                 selectedBattleUnitId = null
             } else if (currentlySelectedUnit == null || tappedUnit.faction == currentlySelectedUnit.faction) {
                 // Select a new friendly unit
@@ -254,9 +257,9 @@ class SandboxViewModel : ViewModel() {
                 currentlySelectedUnit.destinationX = x
                 currentlySelectedUnit.destinationY = y
                 currentlySelectedUnit.state = UnitState.MOVING
-            } else {
-                selectedBattleUnitId = null
             }
+            // Deselect unit once move order is set or empty ground is tapped
+            selectedBattleUnitId = null
         }
     }
 }

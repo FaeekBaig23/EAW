@@ -62,7 +62,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
 import com.faiqbaig.eaw.combat.BattleEngine
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.input.pointer.pointerInput
+import com.faiqbaig.eaw.audio.SoundManager
 
 @Composable
 fun SandboxScreen(
@@ -72,30 +74,53 @@ fun SandboxScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Manage music lifecycle
-    DisposableEffect(lifecycleOwner) {
-        // Start the shuffled playlist when the screen is active
-        MusicPlayerManager.startMusic(context)
+    // Settings & Audio States
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var isMusicEnabled by remember { mutableStateOf(true) }
+    var isSfxEnabled by remember { mutableStateOf(true) }
 
-        // Pause music if the user minimizes the app
+    val soundManager = remember { SoundManager(context) }
+
+    // Sync SFX state with SoundManager
+    soundManager.isSfxEnabled = isSfxEnabled
+
+    // Wire up sound effects callback for BattleEngine
+    DisposableEffect(Unit) {
+        BattleEngine.onVolleyFired = {
+            soundManager.playRandomVolley()
+        }
+        onDispose {
+            BattleEngine.onVolleyFired = null
+            soundManager.release()
+        }
+    }
+
+    // Manage music lifecycle
+    DisposableEffect(lifecycleOwner, isMusicEnabled) {
+        if (isMusicEnabled) {
+            MusicPlayerManager.startMusic(context)
+        } else {
+            MusicPlayerManager.pauseMusic()
+        }
+
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
-                MusicPlayerManager.pauseMusic()
-            } else if (event == Lifecycle.Event.ON_RESUME) {
-                MusicPlayerManager.resumeMusic()
+            if (isMusicEnabled) {
+                if (event == Lifecycle.Event.ON_PAUSE) {
+                    MusicPlayerManager.pauseMusic()
+                } else if (event == Lifecycle.Event.ON_RESUME) {
+                    MusicPlayerManager.resumeMusic()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
 
-        // Clean up and stop music when exiting Sandbox Mode
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             MusicPlayerManager.stopMusic()
         }
     }
 
-    // --- NEW: THE GAME LOOP ---
-    // Runs the BattleEngine math every frame during the Battle Phase
+    // --- GAME LOOP ---
     LaunchedEffect(viewModel.currentPhase.name) {
         if (viewModel.currentPhase.name == "BATTLE") {
             var lastFrameTime = System.nanoTime()
@@ -104,10 +129,7 @@ fun SandboxScreen(
                     val deltaTime = (frameTime - lastFrameTime) / 1_000_000_000f
                     lastFrameTime = frameTime
 
-                    // Run the simulation tick
                     BattleEngine.updateTick(viewModel.units, deltaTime)
-
-                    // Trigger the UI to redraw!
                     viewModel.battleFrame++
                 }
             }
@@ -116,7 +138,6 @@ fun SandboxScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
 
-        // FOG OF WAR LOGIC: Hide enemy units during deployment
         val visibleUnits = when (viewModel.currentPhase.name) {
             "DEPLOYMENT" -> {
                 if (viewModel.activeDeploymentPlayer == 1) {
@@ -125,11 +146,10 @@ fun SandboxScreen(
                     viewModel.units.filter { it.faction == viewModel.player2Faction }
                 }
             }
-            else -> viewModel.units // Show all units during Battle and Post-Battle
+            else -> viewModel.units
         }
 
         // 1. Map Layer
-        // Note: If you added the highlight logic, ensure you pass the selected ID here
         SandboxMapCanvas(
             units = visibleUnits,
             selectedUnitId = viewModel.selectedBattleUnitId,
@@ -140,18 +160,80 @@ fun SandboxScreen(
 
         // 2. Overlay Layer
         when (viewModel.currentPhase.name) {
-            "SETUP" -> {
-                SetupPhaseOverlay(viewModel, onExitToMenu)
-            }
-            "DEPLOYMENT" -> {
-                DeploymentPhaseOverlay(viewModel)
-            }
-            "BATTLE" -> {
-                BattlePhaseOverlay(viewModel)
-            }
-            "POST_BATTLE" -> {
-                PostBattleOverlay(viewModel, onExitToMenu)
-            }
+            "SETUP" -> SetupPhaseOverlay(viewModel, onExitToMenu)
+            "DEPLOYMENT" -> DeploymentPhaseOverlay(viewModel)
+            "BATTLE" -> BattlePhaseOverlay(viewModel)
+            "POST_BATTLE" -> PostBattleOverlay(viewModel, onExitToMenu)
+        }
+
+        // 3. TOP-LEFT SETTINGS BUTTON
+        IconButton(
+            onClick = { showSettingsDialog = true },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings",
+                tint = Color.White
+            )
+        }
+
+        // 4. SETTINGS DIALOG
+        if (showSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = { Text("Battle Settings") },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Music Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Music")
+                            Switch(
+                                checked = isMusicEnabled,
+                                onCheckedChange = { isMusicEnabled = it }
+                            )
+                        }
+
+                        // SFX Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Battle SFX")
+                            Switch(
+                                checked = isSfxEnabled,
+                                onCheckedChange = { isSfxEnabled = it }
+                            )
+                        }
+
+                        // Exit Button
+                        Button(
+                            onClick = {
+                                showSettingsDialog = false
+                                onExitToMenu()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB22222)),
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        ) {
+                            Text("Exit to Menu", color = Color.White)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showSettingsDialog = false }) {
+                        Text("Close")
+                    }
+                }
+            )
         }
     }
 }

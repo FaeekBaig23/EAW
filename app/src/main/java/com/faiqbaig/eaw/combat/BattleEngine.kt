@@ -9,6 +9,8 @@ import kotlin.random.Random
 
 object BattleEngine {
 
+    var onVolleyFired: (() -> Unit)? = null
+
     fun updateTick(units: List<GameUnit>, rawDeltaTime: Float) {
         // Clamp deltaTime to prevent teleportation during UI recomposition frame hitches
         val deltaTime = rawDeltaTime.coerceAtMost(0.05f)
@@ -161,16 +163,21 @@ object BattleEngine {
 
             val distance = getDistance(attacker, target)
             if (distance > attacker.baseStats.effectiveRange) {
-                attacker.clearCurrentOrders() // Target out of range
+                attacker.clearCurrentOrders()
                 return false
             }
 
             val damage = calculateDamage(attacker, target, distance, false)
             target.currentHp -= damage
 
-            // Stamp timestamp when volley fires
             attacker.lastAttackTimestamp = System.currentTimeMillis()
-            return true // Damage was dealt
+
+            // --- PLAY AUDIO FOR INFANTRY VOLLEYS ---
+            if (attacker.unitClass == UnitClass.INFANTRY) {
+                onVolleyFired?.invoke()
+            }
+
+            return true
         }
         return false
     }

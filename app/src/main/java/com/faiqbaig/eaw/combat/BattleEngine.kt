@@ -9,7 +9,9 @@ import kotlin.random.Random
 
 object BattleEngine {
 
+    // --- SOUND CALLBACKS ---
     var onVolleyFired: (() -> Unit)? = null
+    var onArtilleryFired: (() -> Unit)? = null
 
     fun updateTick(units: List<GameUnit>, rawDeltaTime: Float) {
         // Clamp deltaTime to prevent teleportation during UI recomposition frame hitches
@@ -172,15 +174,18 @@ object BattleEngine {
 
             attacker.lastAttackTimestamp = System.currentTimeMillis()
 
-            // --- PLAY AUDIO FOR INFANTRY VOLLEYS ---
-            if (attacker.unitClass == UnitClass.INFANTRY) {
-                onVolleyFired?.invoke()
+            // --- TRIGGER SOUND EFFECTS BASED ON UNIT TYPE ---
+            when (attacker.unitClass) {
+                UnitClass.INFANTRY -> onVolleyFired?.invoke()
+                UnitClass.ARTILLERY -> onArtilleryFired?.invoke()
+                else -> {}
             }
 
             return true
         }
         return false
     }
+
 
     private fun processMelee(attacker: GameUnit, allUnits: List<GameUnit>, deltaTime: Float): Boolean {
         val target = allUnits.find { it.id == attacker.targetUnitId }

@@ -7,6 +7,7 @@ import com.faiqbaig.eaw.R
 
 class SoundManager(context: Context) {
     var isSfxEnabled: Boolean = true
+
     private val soundPool: SoundPool = SoundPool.Builder()
         .setMaxStreams(8)
         .setAudioAttributes(
@@ -17,16 +18,24 @@ class SoundManager(context: Context) {
         )
         .build()
 
-    private val volleySoundIds: List<Int> = listOf(
-        soundPool.load(context, R.raw.volley1, 1),
-        soundPool.load(context, R.raw.volley2, 1),
-        soundPool.load(context, R.raw.volley3, 1)
+    private val volleySounds: List<Pair<Int, Float>> = listOf(
+        soundPool.load(context, R.raw.volley1, 1) to 1.0f,
+        soundPool.load(context, R.raw.volley2, 1) to 1.0f,
+        soundPool.load(context, R.raw.volley3, 1) to 0.67f
     )
+
+    // Load Artillery Fire SFX
+    private val artillerySoundId: Int = soundPool.load(context, R.raw.artillery_fire, 1)
 
     fun playRandomVolley() {
         if (!isSfxEnabled) return
-        val soundId = volleySoundIds.random()
-        soundPool.play(soundId, 1f, 1f, 1, 0, 1f)
+        val (soundId, volume) = volleySounds.random()
+        soundPool.play(soundId, volume, volume, 1, 0, 1f)
+    }
+
+    fun playArtilleryFire() {
+        if (!isSfxEnabled) return
+        soundPool.play(artillerySoundId, 1f, 1f, 1, 0, 1f)
     }
 
     fun release() {

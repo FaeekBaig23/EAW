@@ -89,8 +89,13 @@ fun SandboxScreen(
         BattleEngine.onVolleyFired = {
             soundManager.playRandomVolley()
         }
+        BattleEngine.onArtilleryFired = {
+            soundManager.playArtilleryFire()
+        }
+
         onDispose {
             BattleEngine.onVolleyFired = null
+            BattleEngine.onArtilleryFired = null
             soundManager.release()
         }
     }

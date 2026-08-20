@@ -23,6 +23,7 @@ import com.faiqbaig.eaw.core.UnitState
 import androidx.compose.ui.graphics.nativeCanvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.compose.ui.graphics.PathEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
@@ -42,32 +43,53 @@ fun SandboxMapCanvas(
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        // FORCE REDRAW: Reading 'frame' inside the Canvas scope ensures Compose
-        // invalidates and redraws the canvas on every engine tick.
+        // FORCE REDRAW: Reading 'frame' inside Canvas scope ensures Compose invalidates on tick
         @Suppress("UNUSED_VARIABLE") val unusedFrame = frame
         drawRect(color = Color(0xFF556B2F))
 
         for (unit in units) {
+            // Skip completely invisible units
+            if (unit.alpha <= 0f) continue
 
-            // --- NEW: DRAW MOVEMENT ARROW (Drawn before the unit so it stays underneath) ---
+            val unitAlpha = unit.alpha
+
+            // --- DRAW MOVEMENT ARROW (White Line to Destination) ---
             if (unit.state == UnitState.MOVING && unit.destinationX != null && unit.destinationY != null) {
                 val destX = unit.destinationX!!
                 val destY = unit.destinationY!!
 
-                // Draw line from unit to destination
                 drawLine(
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = Color.White.copy(alpha = 0.6f * unitAlpha),
                     start = Offset(unit.x, unit.y),
                     end = Offset(destX, destY),
                     strokeWidth = 4f
                 )
 
-                // Draw a small destination marker (arrow head substitute)
                 drawCircle(
-                    color = Color.White.copy(alpha = 0.8f),
+                    color = Color.White.copy(alpha = 0.8f * unitAlpha),
                     radius = 8f,
                     center = Offset(destX, destY)
                 )
+            }
+
+            // --- DRAW RED TARGET INDICATOR LINE ---
+            val targetId = unit.targetUnitId
+            if (targetId != null && unit.state != UnitState.ROUTING) {
+                val target = units.find { it.id == targetId }
+
+                if (target != null && target.currentHp > 0) {
+                    val isSelected = unit.id == selectedUnitId
+                    val baseLineAlpha = if (isSelected) 0.9f else 0.4f
+                    val strokeWidth = if (isSelected) 6f else 3f
+
+                    drawLine(
+                        color = Color.Red.copy(alpha = baseLineAlpha * unitAlpha),
+                        start = Offset(unit.x, unit.y),
+                        end = Offset(target.x, target.y),
+                        strokeWidth = strokeWidth,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
+                    )
+                }
             }
 
             // 1. ROTATED SPRITE LAYER
@@ -80,55 +102,55 @@ fun SandboxMapCanvas(
                 // Selection ring in faction color
                 if (unit.id == selectedUnitId) {
                     drawCircle(
-                        color = unit.faction.color.copy(alpha = 0.5f),
+                        color = unit.faction.color.copy(alpha = 0.5f * unitAlpha),
                         radius = 50f,
                         center = Offset.Zero
                     )
                 }
 
-                // Draw standard tactical sprite
+                // Draw standard tactical sprite with faded faction color
                 drawTacticalSprite(
                     unitClass = unit.unitClass,
                     subtype = unit.subtype,
-                    factionColor = unit.faction.color,
+                    factionColor = unit.faction.color.copy(alpha = unit.faction.color.alpha * unitAlpha),
                     flagBitmap = flagBitmaps[unit.faction],
                     commanderName = unit.commanderName
                 )
 
-                // --- SPRITE FLASH (Triggers briefly on volley/melee strike) ---
+                // --- SPRITE FLASH ---
                 val isAttackingFlash =
                     (System.currentTimeMillis() - unit.lastAttackTimestamp) < 120L
 
                 if (isAttackingFlash) {
                     val spriteSize = 60f
                     drawRect(
-                        color = Color.White.copy(alpha = 0.85f),
+                        color = Color.White.copy(alpha = 0.85f * unitAlpha),
                         topLeft = Offset(-spriteSize / 2f, -spriteSize / 2f),
                         size = Size(spriteSize, spriteSize)
                     )
                 }
             }
 
-            // --- NEW: UNROTATED HUD LAYER (Toggled Globally + Light Blue) ---
+            // 2. UNROTATED HUD LAYER (Status Bars)
             if (showStatusBars) {
                 withTransform({
                     translate(left = unit.x, top = unit.y)
                 }) {
                     val barWidth = 60f
                     val barHeight = 6f
-                    val yOffset = -50f // Pushed down slightly since the selection ring is gone
+                    val yOffset = -50f
 
                     val maxUnitHp = unit.baseStats.maxHp.toFloat()
                     val hpRatio = (unit.currentHp / maxUnitHp).coerceIn(0f, 1f)
 
                     // HP Bar (Top - Green)
                     drawRect(
-                        color = Color.Black,
+                        color = Color.Black.copy(alpha = unitAlpha),
                         topLeft = Offset(-barWidth / 2, yOffset),
                         size = Size(barWidth, barHeight)
                     )
                     drawRect(
-                        color = Color.Green,
+                        color = Color.Green.copy(alpha = unitAlpha),
                         topLeft = Offset(-barWidth / 2, yOffset),
                         size = Size(barWidth * hpRatio, barHeight)
                     )
@@ -140,12 +162,12 @@ fun SandboxMapCanvas(
 
                         // Morale Bar (Bottom - Light Blue)
                         drawRect(
-                            color = Color.Black,
+                            color = Color.Black.copy(alpha = unitAlpha),
                             topLeft = Offset(-barWidth / 2, yOffset + barHeight + 2f),
                             size = Size(barWidth, barHeight)
                         )
                         drawRect(
-                            color = Color(0xFFADD8E6), // Light Blue Hex Code
+                            color = Color(0xFFADD8E6).copy(alpha = unitAlpha),
                             topLeft = Offset(-barWidth / 2, yOffset + barHeight + 2f),
                             size = Size(barWidth * moraleRatio, barHeight)
                         )

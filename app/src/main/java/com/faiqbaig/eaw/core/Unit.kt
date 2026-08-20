@@ -72,6 +72,8 @@ data class GameUnit(
 
     var timeSinceLastCombat: Float = 0f
     var chaseOutrunTimer: Float = 0f
+    var deathTimer: Float = 0f
+    var alpha: Float = 1.0f
 
     var isEncircled: Boolean = false
     var isSupplyCut: Boolean = false

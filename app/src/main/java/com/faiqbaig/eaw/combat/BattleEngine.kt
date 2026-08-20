@@ -13,12 +13,24 @@ object BattleEngine {
     var onVolleyFired: (() -> Unit)? = null
     var onArtilleryFired: (() -> Unit)? = null
 
-    fun updateTick(units: List<GameUnit>, rawDeltaTime: Float) {
-        // Clamp deltaTime to prevent teleportation during UI recomposition frame hitches
+    fun updateTick(units: MutableList<GameUnit>, rawDeltaTime: Float) {
         val deltaTime = rawDeltaTime.coerceAtMost(0.05f)
+        val fadeDuration = 1.5f // 1.5 seconds fade-out effect
 
-        units.forEach { unit ->
-            if (unit.currentHp <= 0) return@forEach
+        val iterator = units.iterator()
+        while (iterator.hasNext()) {
+            val unit = iterator.next()
+
+            // Handle dead units: Fade out and remove when fully transparent
+            if (unit.currentHp <= 0) {
+                unit.deathTimer += deltaTime
+                unit.alpha = (1.0f - (unit.deathTimer / fadeDuration)).coerceAtLeast(0f)
+
+                if (unit.alpha <= 0f) {
+                    iterator.remove() // Cleanly remove from map list
+                }
+                continue
+            }
 
             var tookDamageThisTick = false
 
@@ -31,7 +43,7 @@ object BattleEngine {
                 UnitState.CHASING -> processChasing(unit, units, deltaTime)
                 UnitState.RETURNING -> processMovement(unit, deltaTime)
                 UnitState.ROUTING -> processRouting(unit, deltaTime)
-                UnitState.SURRENDERING -> { /* Wait for capture logic */ }
+                UnitState.SURRENDERING -> { }
             }
 
             updateMorale(unit, deltaTime, tookDamageThisTick)
@@ -50,7 +62,6 @@ object BattleEngine {
                 val u1 = units[i]
                 val u2 = units[j]
 
-                // Ignore routing or dead units if necessary
                 if (u1.currentHp <= 0 || u2.currentHp <= 0) continue
 
                 val dx = u2.x - u1.x
@@ -58,18 +69,91 @@ object BattleEngine {
                 val distSq = dx * dx + dy * dy
 
                 if (distSq in 0.0001f..minDistanceSq) {
+
+                    // HOSTILE CONTACT
+                    if (u1.faction != u2.faction) {
+                        // DISENGAGE CHECK: If either unit was given a explicit MOVING order, allow them to pull away
+                        val u1IsWithdrawing = u1.state == UnitState.MOVING
+                        val u2IsWithdrawing = u2.state == UnitState.MOVING
+
+                        if (!u1IsWithdrawing && !u2IsWithdrawing) {
+                            if (u1.state != UnitState.ROUTING && u2.state != UnitState.ROUTING) {
+                                if (u1.unitClass == UnitClass.CAVALRY || u2.unitClass == UnitClass.CAVALRY ||
+                                    u1.state == UnitState.CHASING || u2.state == UnitState.CHASING) {
+
+                                    if (u1.state != UnitState.IN_MELEE) {
+                                        u1.targetUnitId = u2.id
+                                        u1.state = UnitState.IN_MELEE
+                                        u1.isFirstChargeTick = (u1.unitClass == UnitClass.CAVALRY && u1.state == UnitState.CHASING)
+                                        u1.meleeTickTimer = 1.0f // Strike immediately on contact
+                                    }
+
+                                    if (u2.state != UnitState.IN_MELEE) {
+                                        u2.targetUnitId = u1.id
+                                        u2.state = UnitState.IN_MELEE
+                                        u2.isFirstChargeTick = (u2.unitClass == UnitClass.CAVALRY && u2.state == UnitState.CHASING)
+                                        u2.meleeTickTimer = 1.0f // Strike immediately on contact
+                                    }
+                                }
+                            }
+                        }
+
+                        // Apply a minor physical push so withdrawing units can break physical overlap
+                        val dist = sqrt(distSq)
+                        val overlap = (minDistance - dist) / 2f
+                        val nx = dx / dist
+                        val ny = dy / dist
+
+                        u1.x -= nx * overlap * 0.3f
+                        u1.y -= ny * overlap * 0.3f
+                        u2.x += nx * overlap * 0.3f
+                        u2.y += ny * overlap * 0.3f
+
+                        continue
+                    }
+
+                    // FRIENDLY SEPARATION
                     val dist = sqrt(distSq)
                     val overlap = (minDistance - dist) / 2f
                     val nx = dx / dist
                     val ny = dy / dist
+                    val pushFactor = if (u1.state == UnitState.MOVING || u2.state == UnitState.MOVING) 0.2f else 0.5f
 
-                    // Push units apart along collision vector
-                    u1.x -= nx * overlap
-                    u1.y -= ny * overlap
-                    u2.x += nx * overlap
-                    u2.y += ny * overlap
+                    u1.x -= nx * overlap * pushFactor
+                    u1.y -= ny * overlap * pushFactor
+                    u2.x += nx * overlap * pushFactor
+                    u2.y += ny * overlap * pushFactor
                 }
             }
+        }
+    }
+
+    private fun moveTowards(unit: GameUnit, targetX: Float, targetY: Float, deltaTime: Float) {
+        val dx = targetX - unit.x
+        val dy = targetY - unit.y
+        val dist = sqrt(dx * dx + dy * dy)
+
+        if (dist > 1f) {
+            val speed = unit.baseStats.moveSpeed
+            val moveDist = speed * deltaTime
+            val actualMove = min(moveDist, dist)
+
+            val nx = dx / dist
+            val ny = dy / dist
+
+            unit.x += nx * actualMove
+            unit.y += ny * actualMove
+
+            // SMOOTH ROTATION: Interpolate toward movement vector instead of snap-assigning
+            val rawAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+            val targetAngle = rawAngle + 90f
+            val angleDiff = normalizeAngle(targetAngle - unit.rotation)
+            val step = unit.baseStats.rotationSpeed * deltaTime
+
+            unit.rotation += angleDiff.coerceIn(-step, step)
+            unit.isMoving = true
+        } else {
+            unit.isMoving = false
         }
     }
 
@@ -78,7 +162,21 @@ object BattleEngine {
         val target = findNearestEnemyInRange(unit, allUnits, unit.baseStats.detectionRadius)
         if (target != null) {
             unit.targetUnitId = target.id
-            unit.state = UnitState.ROTATING
+
+            val dx = target.x - unit.x
+            val dy = target.y - unit.y
+            val distSq = dx * dx + dy * dy
+            val meleeContactRangeSq = 35f * 35f // 1225f
+
+            // CAVALRY: If enemy is already in physical contact range, enter melee immediately
+            if (unit.unitClass == UnitClass.CAVALRY && distSq <= meleeContactRangeSq) {
+                unit.state = UnitState.IN_MELEE
+                unit.isFirstChargeTick = false // Idle counter-attack gets no charge bonus
+                unit.meleeTickTimer = 0f
+            } else {
+                // Pivot toward enemy first
+                unit.state = UnitState.ROTATING
+            }
         }
     }
 
@@ -134,18 +232,40 @@ object BattleEngine {
         val dx = target.x - unit.x
         val dy = target.y - unit.y
 
-        // --- TWEAKED: Align target angle calculation with the north sprite edge ---
+        // Align target angle calculation with the north sprite edge
         val rawAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-        val targetAngle = rawAngle + 90f // Matches the movement offset adjustment
+        val targetAngle = rawAngle + 90f
 
-        // Simple rotation interpolation
         val angleDiff = normalizeAngle(targetAngle - unit.rotation)
 
         if (abs(angleDiff) <= 15f) { // Within 15-degree tolerance
             unit.rotation = targetAngle
-            unit.state = if (unit.isMelee) UnitState.IN_MELEE else UnitState.FIRING
-            unit.isFirstChargeTick = true
             unit.isMoving = false
+
+            val distance = getDistance(unit, target)
+            val meleeContactRange = 60f // Aligned with collision minDistance (30f radius * 2)
+
+            // --- CAVALRY / MELEE TRANSITION ---
+            if (unit.unitClass == UnitClass.CAVALRY || unit.isMelee) {
+                if (distance <= meleeContactRange) {
+                    unit.state = UnitState.IN_MELEE
+                    unit.isFirstChargeTick = (unit.unitClass == UnitClass.CAVALRY)
+                    unit.meleeTickTimer = 1.0f // Strike immediately on contact
+                } else {
+                    unit.state = UnitState.CHASING // Close distance first
+                }
+            }
+            // --- RANGED TRANSITION ---
+            else {
+                if (distance <= unit.baseStats.effectiveRange) {
+                    if (unit.state != UnitState.FIRING) {
+                        unit.state = UnitState.FIRING
+                        unit.reloadTimer = 0f // Fire initial volley immediately once aimed
+                    }
+                } else {
+                    unit.state = UnitState.CHASING
+                }
+            }
         } else {
             val step = unit.baseStats.rotationSpeed * deltaTime
             unit.rotation += if (angleDiff > 0) min(step, angleDiff) else max(-step, angleDiff)
@@ -153,8 +273,14 @@ object BattleEngine {
     }
 
     private fun processFiring(attacker: GameUnit, allUnits: List<GameUnit>, deltaTime: Float): Boolean {
+        // HARD LOCK: Prevent Cavalry from ever firing ranged attacks
+        if (attacker.unitClass == UnitClass.CAVALRY) {
+            attacker.state = UnitState.CHASING
+            return false
+        }
+
         val target = allUnits.find { it.id == attacker.targetUnitId }
-        if (target == null || target.state == UnitState.ROUTING) {
+        if (target == null || target.state == UnitState.ROUTING || target.currentHp <= 0) {
             attacker.clearCurrentOrders()
             return false
         }
@@ -186,58 +312,81 @@ object BattleEngine {
         return false
     }
 
-
     private fun processMelee(attacker: GameUnit, allUnits: List<GameUnit>, deltaTime: Float): Boolean {
         val target = allUnits.find { it.id == attacker.targetUnitId }
-        if (target == null || target.state == UnitState.ROUTING) {
+
+        if (target == null || target.currentHp <= 0 || target.state == UnitState.ROUTING) {
             attacker.clearCurrentOrders()
+            attacker.state = UnitState.IDLE
             return false
         }
 
-        attacker.meleeTickTimer -= deltaTime
-        if (attacker.meleeTickTimer <= 0f) {
-            attacker.meleeTickTimer = 1.0f // 1-second melee tick
+        // 1. DISTANCE GUARD (Must be larger than collision minDistance of 60f)
+        val distance = getDistance(attacker, target)
+        val maxMeleeRange = 70f // Increased to allow combat within 60f collision bubble
 
-            val distance = getDistance(attacker, target)
-            val damage = calculateDamage(attacker, target, distance, attacker.isFirstChargeTick)
-            target.currentHp -= damage
+        if (distance > maxMeleeRange) {
+            if (attacker.unitClass == UnitClass.CAVALRY) {
+                attacker.state = UnitState.CHASING
+            } else {
+                attacker.clearCurrentOrders()
+                attacker.state = UnitState.IDLE
+            }
+            return false
+        }
 
-            // Stamp timestamp when melee strike connects
+        // 2. MELEE TICK TIMER
+        attacker.meleeTickTimer += deltaTime
+        val meleeInterval = 1.0f
+
+        if (attacker.meleeTickTimer >= meleeInterval) {
+            attacker.meleeTickTimer = 0f
+
+            var damage = attacker.baseStats.meleeDamage.toFloat()
+
+            if (attacker.isFirstChargeTick) {
+                val chargeMultiplier = 1.0f + (attacker.baseStats.chargeBonus ?: 0f)
+                damage *= chargeMultiplier
+                attacker.isFirstChargeTick = false
+            }
+
+            target.currentHp -= damage.toInt()
             attacker.lastAttackTimestamp = System.currentTimeMillis()
 
-            attacker.isFirstChargeTick = false
             return true
         }
+
         return false
     }
 
-    private fun processChasing(unit: GameUnit, allUnits: List<GameUnit>, deltaTime: Float) {
-        val target = allUnits.find { it.id == unit.targetUnitId }
-
-        if (target == null || target.state == UnitState.ROUTING) {
-            breakChase(unit)
+    private fun processChasing(attacker: GameUnit, allUnits: List<GameUnit>, deltaTime: Float) {
+        val target = allUnits.find { it.id == attacker.targetUnitId }
+        if (target == null || target.state == UnitState.ROUTING || target.currentHp <= 0) {
+            attacker.clearCurrentOrders()
             return
         }
 
-        val distance = getDistance(unit, target)
-        val engagementRange = if (unit.isMelee) 10f else unit.baseStats.effectiveRange
+        val distance = getDistance(attacker, target)
+        val meleeContactRange = 35f // Collision distance for melee combat
 
-        if (distance > engagementRange) {
-            // Target is out of range, increment outrun timer
-            unit.chaseOutrunTimer += deltaTime
-            if (unit.chaseOutrunTimer >= 2.0f) {
-                breakChase(unit) // Outrun grace window exceeded
+        // CAVALRY: Always forces close-quarters engagement
+        if (attacker.unitClass == UnitClass.CAVALRY) {
+            if (distance <= meleeContactRange) {
+                attacker.state = UnitState.IN_MELEE
+                attacker.isFirstChargeTick = true // Apply cavalry charge bonus damage
+                attacker.meleeTickTimer = 0f     // Strike immediately on impact
             } else {
-                // Move towards target
-                unit.destinationX = target.x
-                unit.destinationY = target.y
-                processMovement(unit, deltaTime)
+                // Move directly toward target
+                moveTowards(attacker, target.x, target.y, deltaTime)
             }
+            return
+        }
+
+        // INFANTRY & ARTILLERY: Engage at effective range
+        if (distance <= attacker.baseStats.effectiveRange) {
+            attacker.state = UnitState.FIRING
         } else {
-            // Caught up, reset timer and begin engagement
-            unit.chaseOutrunTimer = 0f
-            unit.state = UnitState.ROTATING
-            unit.isMoving = false
+            moveTowards(attacker, target.x, target.y, deltaTime)
         }
     }
 

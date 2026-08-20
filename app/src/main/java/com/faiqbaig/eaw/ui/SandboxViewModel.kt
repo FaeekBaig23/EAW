@@ -246,19 +246,26 @@ class SandboxViewModel : ViewModel() {
                 // Select a new friendly unit
                 selectedBattleUnitId = tappedUnit.id
             } else {
-                // Chase/Attack enemy unit
-                currentlySelectedUnit.targetUnitId = tappedUnit.id
-                currentlySelectedUnit.state = UnitState.CHASING
+                // Target an enemy unit
+                if (currentlySelectedUnit.state != UnitState.ROUTING) {
+                    currentlySelectedUnit.destinationX = null
+                    currentlySelectedUnit.destinationY = null
+
+                    currentlySelectedUnit.targetUnitId = tappedUnit.id
+                    currentlySelectedUnit.state = UnitState.ROTATING
+                }
+                // Deselect active unit immediately after issuing attack order
+                selectedBattleUnitId = null
             }
         } else {
-            if (currentlySelectedUnit != null) {
-                // Move Order
-                currentlySelectedUnit.targetUnitId = null
+            if (currentlySelectedUnit != null && currentlySelectedUnit.state != UnitState.ROUTING) {
+                // Move/Withdraw Order
+                currentlySelectedUnit.targetUnitId = null // Disengages target ID to allow melee withdrawal
                 currentlySelectedUnit.destinationX = x
                 currentlySelectedUnit.destinationY = y
                 currentlySelectedUnit.state = UnitState.MOVING
             }
-            // Deselect unit once move order is set or empty ground is tapped
+            // Deselect unit once order is given
             selectedBattleUnitId = null
         }
     }

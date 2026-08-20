@@ -65,6 +65,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.input.pointer.pointerInput
 import com.faiqbaig.eaw.audio.SoundManager
+import com.faiqbaig.eaw.core.GameUnit
 
 @Composable
 fun SandboxScreen(
@@ -1087,6 +1088,59 @@ fun FactionSelector(
                         .clickable(enabled = !isOpponent) {
                             onFactionSelected(faction)
                         }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SelectedUnitHud(
+    selectedUnit: GameUnit?,
+    modifier: Modifier = Modifier
+) {
+    if (selectedUnit == null || selectedUnit.currentHp <= 0) return
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        contentAlignment = Alignment.BottomEnd
+    ) {
+        Column(
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.75f), shape = RoundedCornerShape(8.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            // Title: Subtype / Commander Name
+            Text(
+                text = selectedUnit.commanderName ?: "${selectedUnit.subtype ?: selectedUnit.unitClass}",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Numeric HP Stats
+            Text(
+                text = "HP: ${selectedUnit.currentHp} / ${selectedUnit.baseStats.maxHp}",
+                color = Color(0xFF4CAF50), // Bright Green
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+
+            // Numeric Morale Stats
+            if (selectedUnit.baseStats.maxMorale != null) {
+                val currentMorale = selectedUnit.currentMorale?.toInt() ?: 0
+                val maxMorale = selectedUnit.baseStats.maxMorale
+
+                Text(
+                    text = "Morale: $currentMorale / $maxMorale",
+                    color = Color(0xFF81D4FA), // Light Blue
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }

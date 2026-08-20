@@ -6,6 +6,14 @@ import android.media.SoundPool
 import com.faiqbaig.eaw.R
 
 class SoundManager(context: Context) {
+
+    init {
+        instance = this
+    }
+
+    companion object {
+        var instance: SoundManager? = null
+    }
     var isSfxEnabled: Boolean = true
 
     private val soundPool: SoundPool = SoundPool.Builder()

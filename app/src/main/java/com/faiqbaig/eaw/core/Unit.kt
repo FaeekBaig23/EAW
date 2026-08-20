@@ -74,6 +74,7 @@ data class GameUnit(
     var chaseOutrunTimer: Float = 0f
     var deathTimer: Float = 0f
     var alpha: Float = 1.0f
+    var timeSinceLastDamage: Float = 10.0f
 
     var isEncircled: Boolean = false
     var isSupplyCut: Boolean = false
@@ -88,7 +89,6 @@ data class GameUnit(
         targetUnitId = null
         destinationX = null
         destinationY = null
-        state = UnitState.IDLE
         isMoving = false
     }
 }

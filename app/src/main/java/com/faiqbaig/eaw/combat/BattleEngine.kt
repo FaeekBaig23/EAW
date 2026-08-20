@@ -1,5 +1,6 @@
 package com.faiqbaig.eaw.combat
 
+import com.faiqbaig.eaw.audio.SoundManager
 import com.faiqbaig.eaw.core.GameUnit
 import com.faiqbaig.eaw.core.UnitState
 import com.faiqbaig.eaw.core.UnitClass
@@ -13,40 +14,41 @@ object BattleEngine {
     var onVolleyFired: (() -> Unit)? = null
     var onArtilleryFired: (() -> Unit)? = null
 
-    fun updateTick(units: MutableList<GameUnit>, rawDeltaTime: Float) {
+    fun updateTick(
+        units: MutableList<GameUnit>,
+        rawDeltaTime: Float,
+        soundManager: SoundManager? = null
+    ) {
         val deltaTime = rawDeltaTime.coerceAtMost(0.05f)
-        val fadeDuration = 1.5f // 1.5 seconds fade-out effect
+        val fadeDuration = 1.5f
 
         val iterator = units.iterator()
         while (iterator.hasNext()) {
             val unit = iterator.next()
 
-            // Handle dead units: Fade out and remove when fully transparent
             if (unit.currentHp <= 0) {
                 unit.deathTimer += deltaTime
                 unit.alpha = (1.0f - (unit.deathTimer / fadeDuration)).coerceAtLeast(0f)
 
                 if (unit.alpha <= 0f) {
-                    iterator.remove() // Cleanly remove from map list
+                    iterator.remove()
                 }
                 continue
             }
-
-            var tookDamageThisTick = false
 
             when (unit.state) {
                 UnitState.IDLE -> processIdle(unit, units)
                 UnitState.MOVING -> processMovement(unit, deltaTime)
                 UnitState.ROTATING -> processRotation(unit, units, deltaTime)
-                UnitState.FIRING -> tookDamageThisTick = processFiring(unit, units, deltaTime)
-                UnitState.IN_MELEE -> tookDamageThisTick = processMelee(unit, units, deltaTime)
+                UnitState.FIRING -> processFiring(unit, units, deltaTime) // Pass exactly 3 parameters
+                UnitState.IN_MELEE -> processMelee(unit, units, deltaTime)
                 UnitState.CHASING -> processChasing(unit, units, deltaTime)
                 UnitState.RETURNING -> processMovement(unit, deltaTime)
-                UnitState.ROUTING -> processRouting(unit, deltaTime)
+                UnitState.ROUTING -> processRouting(unit, units, deltaTime)
                 UnitState.SURRENDERING -> { }
             }
 
-            updateMorale(unit, deltaTime, tookDamageThisTick)
+            updateMorale(unit, deltaTime)
         }
 
         resolveUnitCollisions(units)
@@ -158,23 +160,16 @@ object BattleEngine {
     }
 
     private fun processIdle(unit: GameUnit, allUnits: List<GameUnit>) {
-        // Auto-detect enemies entering range
-        val target = findNearestEnemyInRange(unit, allUnits, unit.baseStats.detectionRadius)
-        if (target != null) {
-            unit.targetUnitId = target.id
+        // ROUTING units can NEVER acquire targets or enter combat
+        if (unit.state == UnitState.ROUTING) return
 
-            val dx = target.x - unit.x
-            val dy = target.y - unit.y
-            val distSq = dx * dx + dy * dy
-            val meleeContactRangeSq = 35f * 35f // 1225f
+        val enemy = allUnits.filter { it.faction != unit.faction && it.currentHp > 0 && it.state != UnitState.ROUTING }
+            .minByOrNull { getDistance(unit, it) }
 
-            // CAVALRY: If enemy is already in physical contact range, enter melee immediately
-            if (unit.unitClass == UnitClass.CAVALRY && distSq <= meleeContactRangeSq) {
-                unit.state = UnitState.IN_MELEE
-                unit.isFirstChargeTick = false // Idle counter-attack gets no charge bonus
-                unit.meleeTickTimer = 0f
-            } else {
-                // Pivot toward enemy first
+        if (enemy != null) {
+            val dist = getDistance(unit, enemy)
+            if (dist <= unit.baseStats.effectiveRange) {
+                unit.targetUnitId = enemy.id
                 unit.state = UnitState.ROTATING
             }
         }
@@ -223,9 +218,13 @@ object BattleEngine {
     }
 
     private fun processRotation(unit: GameUnit, allUnits: List<GameUnit>, deltaTime: Float) {
+        // 1. Guard against routing units attempting to turn/attack
+        if (unit.state == UnitState.ROUTING) return
+
         val target = allUnits.find { it.id == unit.targetUnitId }
         if (target == null || target.currentHp <= 0 || target.state == UnitState.ROUTING) {
             unit.clearCurrentOrders()
+            unit.state = UnitState.IDLE
             return
         }
 
@@ -258,10 +257,8 @@ object BattleEngine {
             // --- RANGED TRANSITION ---
             else {
                 if (distance <= unit.baseStats.effectiveRange) {
-                    if (unit.state != UnitState.FIRING) {
-                        unit.state = UnitState.FIRING
-                        unit.reloadTimer = 0f // Fire initial volley immediately once aimed
-                    }
+                    unit.state = UnitState.FIRING
+                    // Removed full reloadTimer pre-fill to prevent instant-fire loops
                 } else {
                     unit.state = UnitState.CHASING
                 }
@@ -272,87 +269,83 @@ object BattleEngine {
         }
     }
 
-    private fun processFiring(attacker: GameUnit, allUnits: List<GameUnit>, deltaTime: Float): Boolean {
-        // HARD LOCK: Prevent Cavalry from ever firing ranged attacks
-        if (attacker.unitClass == UnitClass.CAVALRY) {
-            attacker.state = UnitState.CHASING
-            return false
-        }
+    private fun processFiring(
+        attacker: GameUnit,
+        allUnits: List<GameUnit>,
+        deltaTime: Float
+    ): Boolean {
+        // Hard check: Routing units cannot fire
+        if (attacker.state == UnitState.ROUTING) return false
 
         val target = allUnits.find { it.id == attacker.targetUnitId }
-        if (target == null || target.state == UnitState.ROUTING || target.currentHp <= 0) {
-            attacker.clearCurrentOrders()
-            return false
-        }
-
-        attacker.reloadTimer -= deltaTime
-        if (attacker.reloadTimer <= 0f) {
-            attacker.reloadTimer = attacker.baseStats.reloadTime ?: 5.0f
-
-            val distance = getDistance(attacker, target)
-            if (distance > attacker.baseStats.effectiveRange) {
-                attacker.clearCurrentOrders()
-                return false
-            }
-
-            val damage = calculateDamage(attacker, target, distance, false)
-            target.currentHp -= damage
-
-            attacker.lastAttackTimestamp = System.currentTimeMillis()
-
-            // --- TRIGGER SOUND EFFECTS BASED ON UNIT TYPE ---
-            when (attacker.unitClass) {
-                UnitClass.INFANTRY -> onVolleyFired?.invoke()
-                UnitClass.ARTILLERY -> onArtilleryFired?.invoke()
-                else -> {}
-            }
-
-            return true
-        }
-        return false
-    }
-
-    private fun processMelee(attacker: GameUnit, allUnits: List<GameUnit>, deltaTime: Float): Boolean {
-        val target = allUnits.find { it.id == attacker.targetUnitId }
-
         if (target == null || target.currentHp <= 0 || target.state == UnitState.ROUTING) {
             attacker.clearCurrentOrders()
             attacker.state = UnitState.IDLE
             return false
         }
 
-        // 1. DISTANCE GUARD (Must be larger than collision minDistance of 60f)
         val distance = getDistance(attacker, target)
-        val maxMeleeRange = 70f // Increased to allow combat within 60f collision bubble
-
-        if (distance > maxMeleeRange) {
-            if (attacker.unitClass == UnitClass.CAVALRY) {
-                attacker.state = UnitState.CHASING
-            } else {
-                attacker.clearCurrentOrders()
-                attacker.state = UnitState.IDLE
-            }
+        if (distance > attacker.baseStats.effectiveRange) {
+            attacker.state = UnitState.CHASING
             return false
         }
 
-        // 2. MELEE TICK TIMER
+        attacker.reloadTimer += deltaTime
+        val reloadTime = attacker.baseStats.reloadTime ?: 4.5f
+
+        if (attacker.reloadTimer >= reloadTime) {
+            attacker.reloadTimer = 0f
+
+            val rawDamage = calculateDamage(attacker, target, distance, isFirstChargeTick = false)
+            applyDamage(target, rawDamage.toFloat())
+            attacker.lastAttackTimestamp = System.currentTimeMillis()
+
+            if (attacker.unitClass == UnitClass.ARTILLERY) {
+                SoundManager.instance?.playArtilleryFire()
+            } else {
+                SoundManager.instance?.playRandomVolley()
+            }
+
+            return true
+        }
+
+        return false
+    }
+
+    private fun processMelee(attacker: GameUnit, allUnits: List<GameUnit>, deltaTime: Float): Boolean {
+        val target = allUnits.find { it.id == attacker.targetUnitId }
+        if (target == null || target.currentHp <= 0 || target.state == UnitState.ROUTING) {
+            attacker.clearCurrentOrders()
+            attacker.state = UnitState.IDLE
+            return false
+        }
+
+        val distance = getDistance(attacker, target)
+        val maxMeleeRange = 70f
+
+        if (distance > maxMeleeRange) {
+            attacker.state = if (attacker.unitClass == UnitClass.CAVALRY) UnitState.CHASING else UnitState.IDLE
+            return false
+        }
+
         attacker.meleeTickTimer += deltaTime
         val meleeInterval = 1.0f
 
         if (attacker.meleeTickTimer >= meleeInterval) {
             attacker.meleeTickTimer = 0f
 
-            var damage = attacker.baseStats.meleeDamage.toFloat()
+            // Calculate raw damage passing charge status
+            val rawDamage = calculateDamage(attacker, target, distance, attacker.isFirstChargeTick)
 
+            // Apply damage and morale penalty
+            applyDamage(target, rawDamage.toFloat())
+
+            // Consume charge bonus after first contact strike
             if (attacker.isFirstChargeTick) {
-                val chargeMultiplier = 1.0f + (attacker.baseStats.chargeBonus ?: 0f)
-                damage *= chargeMultiplier
                 attacker.isFirstChargeTick = false
             }
 
-            target.currentHp -= damage.toInt()
             attacker.lastAttackTimestamp = System.currentTimeMillis()
-
             return true
         }
 
@@ -397,17 +390,38 @@ object BattleEngine {
         // Additional logic to set destinationX/Y to corps position can go here
     }
 
-    private fun processRouting(unit: GameUnit, deltaTime: Float) {
-        val maxMorale = unit.baseStats.maxMorale?.toFloat() ?: return
-        val rallyThreshold = maxMorale * 0.15f
+    private fun processRouting(unit: GameUnit, allUnits: List<GameUnit>, deltaTime: Float) {
+        // Dim unit visually to indicate broken morale
+        unit.alpha = 0.5f
+        unit.isMoving = true
 
-        if (unit.isInCommanderAura) { // Simplified safety check
-            val currentMorale = unit.currentMorale ?: 0f
-            unit.currentMorale = currentMorale + (unit.baseStats.moraleRegenPerSecIdle * deltaTime)
+        // Find nearest living enemy
+        val nearestEnemy = allUnits.filter {
+            it.faction != unit.faction && it.currentHp > 0
+        }.minByOrNull { getDistance(unit, it) }
 
-            if (unit.currentMorale!! >= rallyThreshold) {
-                unit.state = UnitState.IDLE
+        val safeDistance = 500f // Distance required to escape enemy threat
+
+        if (nearestEnemy != null && getDistance(unit, nearestEnemy) < safeDistance) {
+            val dx = unit.x - nearestEnemy.x
+            val dy = unit.y - nearestEnemy.y
+            val dist = sqrt(dx * dx + dy * dy)
+
+            if (dist > 0.001f) {
+                val nx = dx / dist
+                val ny = dy / dist
+
+                // Snap rotation 180 degrees away from the enemy (aligned with sprite north edge)
+                val rawAngle = Math.toDegrees(atan2(ny.toDouble(), nx.toDouble())).toFloat()
+                unit.rotation = rawAngle + 90f
+
+                // Move away at normal movement speed
+                unit.x += nx * unit.baseStats.moveSpeed * deltaTime
+                unit.y += ny * unit.baseStats.moveSpeed * deltaTime
             }
+        } else {
+            // Out of enemy targeting range: Stop fleeing and wait for morale recharge
+            unit.isMoving = false
         }
     }
 
@@ -443,43 +457,66 @@ object BattleEngine {
         return (baseDamage * hpRatioMult * rangeMult * moveMult * chargeMult * randRoll).roundToInt()
     }
 
-    private fun updateMorale(unit: GameUnit, deltaTimeSec: Float, tookDamageThisTick: Boolean) {
-        if (unit.state == UnitState.ROUTING || unit.state == UnitState.SURRENDERING) return
+    private fun applyDamage(target: GameUnit, damage: Float) {
+        target.currentHp = (target.currentHp - damage.toInt()).coerceAtLeast(0)
+        target.timeSinceLastDamage = 0f // Reset 10-second no-damage timer
 
-        val maxMorale = unit.baseStats.maxMorale?.toFloat() ?: return // Skip morale checks for Commanders
-        var currentMorale = unit.currentMorale ?: maxMorale
+        val maxMorale = target.baseStats.maxMorale?.toFloat() ?: return
+        val maxHp = target.baseStats.maxHp.toFloat()
 
-        var decayMultiplier = 1.0f
-        if (unit.isEncircled) decayMultiplier *= 2.0f
-        if (unit.isInCommanderAura) decayMultiplier *= 0.8f // Assuming 20% resistance bonus
+        val currentMorale = target.currentMorale ?: maxMorale
 
-        if (unit.state == UnitState.MOVING || unit.state == UnitState.CHASING) {
-            currentMorale -= (unit.baseStats.moraleDecayPerSecMoving * deltaTimeSec * decayMultiplier)
+        // Scale morale loss proportional to damage taken relative to max HP
+        val hpPercentLost = damage / maxHp
+        val moraleLoss = maxMorale * hpPercentLost * 1.2f
+
+        val newMorale = (currentMorale - moraleLoss).coerceAtLeast(0f)
+        target.currentMorale = newMorale
+
+        // ROUTING: Trigger flee state if damage breaks morale to 0
+        if (newMorale <= 0f && target.state != UnitState.ROUTING) {
+            target.state = UnitState.ROUTING
+            target.clearCurrentOrders()
+        }
+    }
+
+    private fun updateMorale(unit: GameUnit, deltaTime: Float) {
+        val maxMorale = unit.baseStats.maxMorale?.toFloat() ?: return
+
+        if (unit.currentMorale == null) {
+            unit.currentMorale = maxMorale
         }
 
-        if (unit.isSupplyCut) {
-            currentMorale -= (unit.baseStats.supplyCutMoraleDrainPerSec * deltaTimeSec)
+        var currentMorale = unit.currentMorale!!
+        unit.timeSinceLastDamage += deltaTime
+
+        // 1. MARCHING DRAIN (Clamps at 0f, does not trigger routing on its own)
+        val isMarching = unit.isMoving && (unit.state == UnitState.MOVING || unit.state == UnitState.RETURNING)
+        if (isMarching && currentMorale > 0f) {
+            val drain = unit.baseStats.moraleDecayPerSecMoving * deltaTime
+            currentMorale = (currentMorale - drain).coerceAtLeast(0f)
+            unit.currentMorale = currentMorale
         }
 
-        if (tookDamageThisTick) {
-            currentMorale -= (maxMorale * unit.baseStats.moraleDecayPerHitPct * decayMultiplier)
-            unit.timeSinceLastCombat = 0f
-        } else {
-            unit.timeSinceLastCombat += deltaTimeSec
+        // 2. ENFORCE ROUTING: If morale is 0 and unit tries to fight/engage, break state to ROUTING
+        val isInCombatState = unit.state in listOf(UnitState.FIRING, UnitState.IN_MELEE, UnitState.CHASING, UnitState.ROTATING)
+        if (currentMorale <= 0f && isInCombatState) {
+            unit.state = UnitState.ROUTING
+            unit.clearCurrentOrders()
+            return
         }
 
-        if (unit.state == UnitState.IDLE && unit.timeSinceLastCombat >= 3.0f) {
-            currentMorale += (unit.baseStats.moraleRegenPerSecIdle * deltaTimeSec)
-        }
+        // 3. MORALE REGEN (Triggers after 10s without damage when IDLE or ROUTING out of combat)
+        val canRegen = (unit.state == UnitState.IDLE || unit.state == UnitState.ROUTING) && unit.timeSinceLastDamage >= 10.0f
+        if (canRegen && currentMorale < maxMorale) {
+            val regen = unit.baseStats.moraleRegenPerSecIdle * deltaTime
+            currentMorale = (currentMorale + regen).coerceAtMost(maxMorale)
+            unit.currentMorale = currentMorale
 
-        unit.currentMorale = currentMorale.coerceIn(0f, maxMorale)
-
-        if (unit.currentMorale!! <= 0f) {
-            if (unit.isEncircled && !unit.hasFleePath) {
-                unit.state = UnitState.SURRENDERING
-            } else {
-                unit.state = UnitState.ROUTING
-                unit.clearCurrentOrders()
+            // RALLY: If routing unit recovers above 25% morale, rally back to IDLE
+            if (unit.state == UnitState.ROUTING && currentMorale >= (maxMorale * 0.25f)) {
+                unit.state = UnitState.IDLE
+                unit.alpha = 1.0f // Restore full opacity
             }
         }
     }

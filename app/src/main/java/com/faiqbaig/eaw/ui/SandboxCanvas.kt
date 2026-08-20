@@ -43,24 +43,27 @@ fun SandboxMapCanvas(
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        // FORCE REDRAW: Reading 'frame' inside Canvas scope ensures Compose invalidates on tick
         @Suppress("UNUSED_VARIABLE") val unusedFrame = frame
         drawRect(color = Color(0xFF556B2F))
 
         for (unit in units) {
-            // Skip completely invisible units
             if (unit.alpha <= 0f) continue
 
             val unitAlpha = unit.alpha
+            val isCommander = unit.unitClass == UnitClass.COMMANDER
+            val isDead = unit.currentHp <= 0
 
-            // --- DRAW MOVEMENT ARROW (White Line to Destination) ---
+            // Anchor point (x, y): Pole base for commanders, center for standard units
+            val unitAnchor = Offset(unit.x, unit.y)
+
+            // --- MOVEMENT ARROW (White Line from Pole Base to Destination) ---
             if (unit.state == UnitState.MOVING && unit.destinationX != null && unit.destinationY != null) {
                 val destX = unit.destinationX!!
                 val destY = unit.destinationY!!
 
                 drawLine(
                     color = Color.White.copy(alpha = 0.6f * unitAlpha),
-                    start = Offset(unit.x, unit.y),
+                    start = unitAnchor,
                     end = Offset(destX, destY),
                     strokeWidth = 4f
                 )
@@ -72,7 +75,7 @@ fun SandboxMapCanvas(
                 )
             }
 
-            // --- DRAW RED TARGET INDICATOR LINE ---
+            // --- RED TARGET INDICATOR LINE (Ends at Target's Pole Base) ---
             val targetId = unit.targetUnitId
             if (targetId != null && unit.state != UnitState.ROUTING) {
                 val target = units.find { it.id == targetId }
@@ -82,24 +85,40 @@ fun SandboxMapCanvas(
                     val baseLineAlpha = if (isSelected) 0.9f else 0.4f
                     val strokeWidth = if (isSelected) 6f else 3f
 
+                    // Target anchor points directly to the pole base if target is a Commander
+                    val targetAnchor = Offset(target.x, target.y)
+
                     drawLine(
                         color = Color.Red.copy(alpha = baseLineAlpha * unitAlpha),
-                        start = Offset(unit.x, unit.y),
-                        end = Offset(target.x, target.y),
+                        start = unitAnchor,
+                        end = targetAnchor,
                         strokeWidth = strokeWidth,
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
                     )
                 }
             }
 
-            // 1. ROTATED SPRITE LAYER
+            // 1. ROTATED / TOPPLED SPRITE LAYER
             withTransform({
+                // Translate canvas origin directly to unit anchor (pole base)
                 translate(left = unit.x, top = unit.y)
-                if (unit.unitClass != UnitClass.COMMANDER) {
+
+                if (isCommander) {
+                    // Topple 90° left pivoting on the pole base
+                    if (isDead) {
+                        val deathProgress = (1.0f - unit.alpha).coerceIn(0f, 1f)
+                        rotate(
+                            degrees = -90f * deathProgress,
+                            pivot = Offset.Zero
+                        )
+                    }
+                    // Shift sprite upwards so local (0,0) is precisely the pole base
+                    translate(left = 0f, top = -25f)
+                } else {
                     rotate(degrees = unit.rotation, pivot = Offset.Zero)
                 }
             }) {
-                // Selection ring in faction color
+                // Selection ring centered on sprite
                 if (unit.id == selectedUnitId) {
                     drawCircle(
                         color = unit.faction.color.copy(alpha = 0.5f * unitAlpha),
@@ -108,23 +127,22 @@ fun SandboxMapCanvas(
                     )
                 }
 
-                // Draw standard tactical sprite with faded faction color
+                val effectiveSpriteAlpha = if (isCommander && isDead) 1.0f else unitAlpha
+
                 drawTacticalSprite(
                     unitClass = unit.unitClass,
                     subtype = unit.subtype,
-                    factionColor = unit.faction.color.copy(alpha = unit.faction.color.alpha * unitAlpha),
+                    factionColor = unit.faction.color.copy(alpha = unit.faction.color.alpha * effectiveSpriteAlpha),
                     flagBitmap = flagBitmaps[unit.faction],
                     commanderName = unit.commanderName
                 )
 
                 // --- SPRITE FLASH ---
-                val isAttackingFlash =
-                    (System.currentTimeMillis() - unit.lastAttackTimestamp) < 120L
-
+                val isAttackingFlash = (System.currentTimeMillis() - unit.lastAttackTimestamp) < 120L
                 if (isAttackingFlash) {
                     val spriteSize = 60f
                     drawRect(
-                        color = Color.White.copy(alpha = 0.85f * unitAlpha),
+                        color = Color.White.copy(alpha = 0.85f * effectiveSpriteAlpha),
                         topLeft = Offset(-spriteSize / 2f, -spriteSize / 2f),
                         size = Size(spriteSize, spriteSize)
                     )
@@ -132,18 +150,18 @@ fun SandboxMapCanvas(
             }
 
             // 2. UNROTATED HUD LAYER (Status Bars)
-            if (showStatusBars) {
+            if (showStatusBars && unit.currentHp > 0) {
                 withTransform({
                     translate(left = unit.x, top = unit.y)
                 }) {
                     val barWidth = 60f
                     val barHeight = 6f
-                    val yOffset = -50f
+                    val yOffset = if (isCommander) -75f else -50f
 
                     val maxUnitHp = unit.baseStats.maxHp.toFloat()
                     val hpRatio = (unit.currentHp / maxUnitHp).coerceIn(0f, 1f)
 
-                    // HP Bar (Top - Green)
+                    // HP Bar
                     drawRect(
                         color = Color.Black.copy(alpha = unitAlpha),
                         topLeft = Offset(-barWidth / 2, yOffset),
@@ -160,7 +178,7 @@ fun SandboxMapCanvas(
                         val safeCurrentMorale = unit.currentMorale ?: 0f
                         val moraleRatio = (safeCurrentMorale / maxUnitMorale).coerceIn(0f, 1f)
 
-                        // Morale Bar (Bottom - Light Blue)
+                        // Morale Bar
                         drawRect(
                             color = Color.Black.copy(alpha = unitAlpha),
                             topLeft = Offset(-barWidth / 2, yOffset + barHeight + 2f),
